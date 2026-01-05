@@ -120,22 +120,24 @@ export function StallView({ onWriteRequest, stallRef }: StallViewProps) {
     mouseStartX.current = null;
   };
 
-  // Rotate camera
+  // Rotate camera (inverted for interior perspective)
   const rotate = (direction: 'left' | 'right') => {
     setIsTransitioning(true);
     setFacing((prev) => {
-      if (direction === 'left') {
-        if (prev === 'front') return 'left';
-        if (prev === 'right') return 'front';
-        if (prev === 'left') return 'right';
-      } else {
+      // Drag RIGHT = turn head right = see RIGHT wall
+      if (direction === 'right') {
         if (prev === 'front') return 'right';
         if (prev === 'left') return 'front';
         if (prev === 'right') return 'left';
+      } else {
+        // Drag LEFT = turn head left = see LEFT wall
+        if (prev === 'front') return 'left';
+        if (prev === 'right') return 'front';
+        if (prev === 'left') return 'right';
       }
       return prev;
     });
-    setTimeout(() => setIsTransitioning(false), 200);
+    setTimeout(() => setIsTransitioning(false), 300);
   };
 
   // Get rotation based on facing direction (90 degrees, not 45)
@@ -158,8 +160,8 @@ export function StallView({ onWriteRequest, stallRef }: StallViewProps) {
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseLeave}
       style={{
-        perspective: '1200px',
-        perspectiveOrigin: 'center 45%',
+        perspective: '1000px',
+        perspectiveOrigin: 'center 58%',
       }}
     >
       {/* Overhead fluorescent lighting overlay */}
@@ -192,8 +194,8 @@ export function StallView({ onWriteRequest, stallRef }: StallViewProps) {
             `,
             backgroundSize: '60px 60px',
             backgroundPosition: '0 0, 30px 30px',
-            transform: 'rotateX(90deg) translateZ(0px)',
-            transformOrigin: 'center bottom',
+            transform: 'rotateX(90deg) translateZ(-250px)',
+            transformOrigin: 'center center',
             borderTop: '1px solid #a89888',
           }}
         />
@@ -205,8 +207,8 @@ export function StallView({ onWriteRequest, stallRef }: StallViewProps) {
             width: '800px',
             height: '200px',
             background: 'linear-gradient(to bottom, #b0b0b0, #a0a0a0)',
-            transform: 'rotateX(-90deg) translateZ(0px)',
-            transformOrigin: 'center top',
+            transform: 'rotateX(-90deg) translateZ(-350px)',
+            transformOrigin: 'center center',
             boxShadow: 'inset 0 -10px 40px rgba(255,255,255,0.3)',
           }}
         >
@@ -229,7 +231,7 @@ export function StallView({ onWriteRequest, stallRef }: StallViewProps) {
           style={{
             width: '400px',
             height: '600px',
-            transform: 'translateZ(-300px)',
+            transform: 'translateZ(-200px)',
             transformStyle: 'preserve-3d',
           }}
         >
@@ -242,7 +244,7 @@ export function StallView({ onWriteRequest, stallRef }: StallViewProps) {
           style={{
             width: '400px',
             height: '600px',
-            transform: 'rotateY(90deg) translateZ(-300px)',
+            transform: 'rotateY(90deg) translateZ(-200px)',
             transformStyle: 'preserve-3d',
           }}
         >
@@ -255,7 +257,7 @@ export function StallView({ onWriteRequest, stallRef }: StallViewProps) {
           style={{
             width: '400px',
             height: '600px',
-            transform: 'rotateY(-90deg) translateZ(-300px)',
+            transform: 'rotateY(-90deg) translateZ(-200px)',
             transformStyle: 'preserve-3d',
           }}
         >
