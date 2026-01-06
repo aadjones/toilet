@@ -24,7 +24,8 @@ export async function initializeDatabase() {
   `;
 }
 
-// Get all non-expired graffiti for a wall, with calculated opacity
+// Get all non-expired graffiti for a wall
+// Opacity is calculated client-side for real-time fading
 export async function getGraffitiForWall(wall: WallType): Promise<Graffiti[]> {
   const result = await sql`
     SELECT
@@ -41,30 +42,16 @@ export async function getGraffitiForWall(wall: WallType): Promise<Graffiti[]> {
     ORDER BY created_at ASC
   `;
 
-  const now = Date.now();
-
-  return result.rows.map(row => {
-    const createdAt = new Date(row.created_at).getTime();
-    const expiresAt = new Date(row.expires_at).getTime();
-    const lifespan = expiresAt - createdAt;
-    const age = now - createdAt;
-    const progress = Math.min(age / lifespan, 1);
-
-    // Carved doesn't fade, others fade from 1.0 to 0.3
-    const opacity = row.implement === 'carved'
-      ? 1.0
-      : 1.0 - (progress * 0.7);
-
-    return {
-      id: row.id,
-      wall: row.wall as WallType,
-      implement: row.implement as ImplementType,
-      strokeData: row.stroke_data as Stroke[],
-      color: row.color,
-      createdAt: row.created_at,
-      opacity,
-    };
-  });
+  return result.rows.map(row => ({
+    id: row.id,
+    wall: row.wall as WallType,
+    implement: row.implement as ImplementType,
+    strokeData: row.stroke_data as Stroke[],
+    color: row.color,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    opacity: 1, // Calculated client-side via calculateOpacity()
+  }));
 }
 
 // Create new graffiti

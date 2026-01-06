@@ -7,21 +7,25 @@ import {
   type WallType,
   type Stroke,
   type StrokePoint,
+  type Graffiti,
   IMPLEMENT_STYLES,
   CARVE_VELOCITY_THRESHOLD,
 } from '@/lib/config';
+import { renderGraffitiStrokes } from '@/lib/wall-rendering';
 
 interface DrawingModeProps {
   wall: WallType;
+  existingGraffiti: Graffiti[];
   onSubmit: (strokeData: Stroke[], implement: ImplementType) => void;
   onCancel: () => void;
 }
 
-export function DrawingMode({ wall, onSubmit, onCancel }: DrawingModeProps) {
+export function DrawingMode({ wall, existingGraffiti, onSubmit, onCancel }: DrawingModeProps) {
   const [implement, setImplement] = useState<ImplementType>('scribble');
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [currentStroke, setCurrentStroke] = useState<StrokePoint[]>([]);
   const [isDrawing, setIsDrawing] = useState(false);
+  const [isImplementLocked, setIsImplementLocked] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -61,40 +65,24 @@ export function DrawingMode({ wall, onSubmit, onCancel }: DrawingModeProps) {
     // Clear and redraw
     ctx.clearRect(0, 0, rect.width, rect.height);
 
-    // Draw completed strokes
-    const style = IMPLEMENT_STYLES[implement];
-    ctx.strokeStyle = style.color;
-    ctx.lineWidth = style.lineWidth;
-    ctx.lineCap = style.lineCap;
-    ctx.lineJoin = style.lineJoin;
+    // First render existing graffiti
+    renderGraffitiStrokes(ctx, existingGraffiti, rect.width, rect.height);
 
-    if (implement === 'carved') {
-      ctx.setLineDash([2, 1]);
-    } else {
-      ctx.setLineDash([]);
-    }
+    // Then render new strokes on top
+    const allStrokes = [...strokes, currentStroke].filter(s => s.length >= 2);
+    const newGraffitiToRender: Graffiti[] = allStrokes.map((stroke, i) => ({
+      id: `temp-${i}`,
+      wall,
+      implement,
+      strokeData: [stroke],
+      color: IMPLEMENT_STYLES[implement].color,
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date().toISOString(),
+      opacity: 1,
+    }));
 
-    [...strokes, currentStroke].forEach((stroke) => {
-      if (stroke.length < 2) return;
-
-      ctx.beginPath();
-      ctx.moveTo(stroke[0].x * rect.width, stroke[0].y * rect.height);
-
-      for (let i = 1; i < stroke.length; i++) {
-        const x = stroke[i].x * rect.width;
-        const y = stroke[i].y * rect.height;
-
-        if (implement === 'scribble') {
-          const wobble = (Math.random() - 0.5) * 1;
-          ctx.lineTo(x + wobble, y + wobble);
-        } else {
-          ctx.lineTo(x, y);
-        }
-      }
-
-      ctx.stroke();
-    });
-  }, [strokes, currentStroke, implement]);
+    renderGraffitiStrokes(ctx, newGraffitiToRender, rect.width, rect.height);
+  }, [strokes, currentStroke, implement, existingGraffiti, wall]);
 
   const getPointFromTouch = useCallback((touch: React.Touch): StrokePoint | null => {
     const container = containerRef.current;
@@ -172,10 +160,14 @@ export function DrawingMode({ wall, onSubmit, onCancel }: DrawingModeProps) {
     setIsDrawing(false);
     if (currentStroke.length >= 2) {
       setStrokes((prev) => [...prev, currentStroke]);
+      // Lock implement after first stroke
+      if (!isImplementLocked) {
+        setIsImplementLocked(true);
+      }
     }
     setCurrentStroke([]);
     lastPointRef.current = null;
-  }, [isDrawing, currentStroke]);
+  }, [isDrawing, currentStroke, isImplementLocked]);
 
   // Mouse event handlers for desktop support
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -230,10 +222,14 @@ export function DrawingMode({ wall, onSubmit, onCancel }: DrawingModeProps) {
     setIsDrawing(false);
     if (currentStroke.length >= 2) {
       setStrokes((prev) => [...prev, currentStroke]);
+      // Lock implement after first stroke
+      if (!isImplementLocked) {
+        setIsImplementLocked(true);
+      }
     }
     setCurrentStroke([]);
     lastPointRef.current = null;
-  }, [isDrawing, currentStroke]);
+  }, [isDrawing, currentStroke, isImplementLocked]);
 
   const handleSubmit = () => {
     if (strokes.length === 0) return;
@@ -244,25 +240,27 @@ export function DrawingMode({ wall, onSubmit, onCancel }: DrawingModeProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-[#2a2a2a]">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 bg-[#3a3a3a]">
+      {/* Header - mobile-optimized touch targets (WCAG 44x44px minimum) */}
+      <div className="flex items-center justify-between px-2 py-2 bg-[#3a3a3a]">
         <button
           onClick={onCancel}
-          className="text-[#aaa] text-sm hover:text-[#ccc]"
+          className="text-[#aaa] text-base hover:text-[#ccc] min-h-[44px] min-w-[44px] px-3 flex items-center justify-center"
+          aria-label="Cancel drawing"
         >
           Cancel
         </button>
-        <span className="text-[#888] text-xs">
+        <span className="text-[#888] text-sm">
           {wallLabel}
         </span>
         <button
           onClick={handleSubmit}
           disabled={strokes.length === 0}
-          className={`text-sm font-medium ${
+          className={`text-base font-medium min-h-[44px] min-w-[44px] px-3 flex items-center justify-center ${
             strokes.length > 0
               ? 'text-[#e8e0d5] hover:text-white'
-              : 'text-[#666]'
+              : 'text-[#666] cursor-not-allowed'
           }`}
+          aria-label="Done drawing"
         >
           Done
         </button>
@@ -299,19 +297,26 @@ export function DrawingMode({ wall, onSubmit, onCancel }: DrawingModeProps) {
           className="absolute inset-0 w-full h-full touch-none"
         />
 
-        {/* Hint text when empty */}
-        {strokes.length === 0 && currentStroke.length === 0 && (
+        {/* Hint text for carved mode only, when user hasn't started drawing */}
+        {implement === 'carved' && strokes.length === 0 && currentStroke.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <p className="text-[#999] text-sm">
-              {implement === 'carved' ? 'Move slowly to carve' : 'Draw something'}
-            </p>
+            <p className="text-[#999] text-sm">Move slowly to carve</p>
           </div>
         )}
       </div>
 
       {/* Toolbar */}
-      <div className="px-4 py-4 bg-[#3a3a3a] flex justify-center">
-        <ImplementPicker selected={implement} onChange={setImplement} />
+      <div className="px-4 py-4 bg-[#3a3a3a] flex flex-col items-center gap-2">
+        <ImplementPicker
+          selected={implement}
+          onChange={setImplement}
+          disabled={isImplementLocked}
+        />
+        {isImplementLocked && (
+          <p className="text-[#888] text-xs">
+            Implement locked after first stroke
+          </p>
+        )}
       </div>
     </div>
   );

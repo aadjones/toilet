@@ -60,5 +60,6 @@ export interface Graffiti {
   strokeData: Stroke[];
   color: string;
   createdAt: string;
+  expiresAt: string;
   opacity: number;
 }

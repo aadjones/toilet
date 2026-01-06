@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getGraffitiForWall, createGraffiti } from '@/lib/db';
 import { IMPLEMENT_STYLES, type WallType, type ImplementType, type Stroke } from '@/lib/config';
+import { checkRateLimit } from '@/lib/rate-limit';
 
 // GET /api/graffiti?wall=front
 export async function GET(request: NextRequest) {
@@ -27,6 +28,26 @@ export async function GET(request: NextRequest) {
 
 // POST /api/graffiti
 export async function POST(request: NextRequest) {
+  // Rate limit by IP address: 5 posts per hour
+  const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+    || request.headers.get('x-real-ip')
+    || 'unknown';
+
+  const rateLimit = checkRateLimit(ip, 5, 60 * 60 * 1000);
+
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please try again later.' },
+      {
+        status: 429,
+        headers: {
+          'X-RateLimit-Remaining': '0',
+          'X-RateLimit-Reset': String(rateLimit.resetAt),
+        },
+      }
+    );
+  }
+
   try {
     const body = await request.json();
     const { wall, implement, strokeData } = body as {
@@ -57,6 +78,47 @@ export async function POST(request: NextRequest) {
         { error: 'strokeData must be a non-empty array of strokes.' },
         { status: 400 }
       );
+    }
+
+    // Validate stroke count (prevent abuse)
+    if (strokeData.length > 100) {
+      return NextResponse.json(
+        { error: 'Too many strokes. Maximum 100 strokes per graffiti.' },
+        { status: 400 }
+      );
+    }
+
+    // Validate coordinate bounds and point counts
+    for (const stroke of strokeData) {
+      if (!Array.isArray(stroke) || stroke.length === 0) {
+        return NextResponse.json(
+          { error: 'Each stroke must be a non-empty array of points.' },
+          { status: 400 }
+        );
+      }
+
+      if (stroke.length > 500) {
+        return NextResponse.json(
+          { error: 'Stroke too long. Maximum 500 points per stroke.' },
+          { status: 400 }
+        );
+      }
+
+      for (const point of stroke) {
+        if (
+          typeof point.x !== 'number' ||
+          typeof point.y !== 'number' ||
+          point.x < 0 ||
+          point.x > 1 ||
+          point.y < 0 ||
+          point.y > 1
+        ) {
+          return NextResponse.json(
+            { error: 'All coordinates must be numbers between 0 and 1.' },
+            { status: 400 }
+          );
+        }
+      }
     }
 
     // Get color from implement style
