@@ -1,30 +1,50 @@
-'use client';
+"use client";
 
-import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import * as THREE from 'three';
-import { type Graffiti, type WallType, type Stroke, type StrokePoint, type ImplementType, POLL_INTERVAL_MS, IMPLEMENT_STYLES } from '@/lib/config';
-import { renderGraffitiStrokes } from '@/lib/wall-rendering';
-import { ImplementPicker } from './ImplementPicker';
-import { createWallTexture, createDoorTexture, createFloorTexture, createCeilingTexture } from '@/lib/texture-generation';
-import { shouldAcceptPoint, createTimedPoint, type TimedPoint } from '@/lib/velocity-gating';
+import { useRef, useEffect, useCallback, useState, useMemo } from "react";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import * as THREE from "three";
+import {
+  type Graffiti,
+  type WallType,
+  type Stroke,
+  type StrokePoint,
+  type ImplementType,
+  POLL_INTERVAL_MS,
+  IMPLEMENT_STYLES,
+} from "@/lib/config";
+import { renderGraffitiStrokes } from "@/lib/wall-rendering";
+import { ImplementPicker } from "./ImplementPicker";
+import {
+  createWallTexture,
+  createDoorTexture,
+  createFloorTexture,
+  createCeilingTexture,
+} from "@/lib/texture-generation";
+import {
+  shouldAcceptPoint,
+  createTimedPoint,
+  type TimedPoint,
+} from "@/lib/velocity-gating";
 
 interface StallView3DProps {
-  onSubmit: (wall: WallType, strokeData: Stroke[], implement: ImplementType) => void;
+  onSubmit: (
+    wall: WallType,
+    strokeData: Stroke[],
+    implement: ImplementType
+  ) => void;
   stallRef?: React.MutableRefObject<any>;
   debugUnlimitedPosting?: boolean;
   onDebugUnlimitedPostingChange?: (enabled: boolean) => void;
 }
 
-type FacingDirection = 'front' | 'left' | 'right';
+type FacingDirection = "front" | "left" | "right";
 
 // Convert facing direction to camera rotation (Y-axis radians)
 const FACING_TO_ROTATION: Record<FacingDirection, number> = {
   front: 0,
-  left: Math.PI / 2,    // 90 degrees left
-  right: -Math.PI / 2,  // 90 degrees right
+  left: Math.PI / 2, // 90 degrees left
+  right: -Math.PI / 2, // 90 degrees right
 };
-
 
 // Helper to calculate screen-space bounding box of a wall based on facing direction
 function calculateWallBounds(
@@ -33,7 +53,7 @@ function calculateWallBounds(
   canvasHeight: number,
   wallDistance: number,
   wallHeight: number,
-  facing: 'front' | 'left' | 'right'
+  facing: "front" | "left" | "right"
 ): { minX: number; maxX: number; minY: number; maxY: number } | null {
   if (!(camera as THREE.PerspectiveCamera).isPerspectiveCamera) return null;
 
@@ -50,34 +70,83 @@ function calculateWallBounds(
 
   let wallCorners: THREE.Vector3[];
 
-  if (facing === 'front') {
+  if (facing === "front") {
     // Front wall (door) - vertical plane at frontZ
     wallCorners = [
-      new THREE.Vector3(-stallWidth / 2, wallCenterY - adjustedWallHeight / 2, frontZ), // bottom-left
-      new THREE.Vector3(stallWidth / 2, wallCenterY - adjustedWallHeight / 2, frontZ),  // bottom-right
-      new THREE.Vector3(-stallWidth / 2, wallCenterY + adjustedWallHeight / 2, frontZ), // top-left
-      new THREE.Vector3(stallWidth / 2, wallCenterY + adjustedWallHeight / 2, frontZ),  // top-right
+      new THREE.Vector3(
+        -stallWidth / 2,
+        wallCenterY - adjustedWallHeight / 2,
+        frontZ
+      ), // bottom-left
+      new THREE.Vector3(
+        stallWidth / 2,
+        wallCenterY - adjustedWallHeight / 2,
+        frontZ
+      ), // bottom-right
+      new THREE.Vector3(
+        -stallWidth / 2,
+        wallCenterY + adjustedWallHeight / 2,
+        frontZ
+      ), // top-left
+      new THREE.Vector3(
+        stallWidth / 2,
+        wallCenterY + adjustedWallHeight / 2,
+        frontZ
+      ), // top-right
     ];
-  } else if (facing === 'left') {
+  } else if (facing === "left") {
     // Left wall - vertical plane at x = -wallDistance, extends in Z
     wallCorners = [
-      new THREE.Vector3(-wallDistance, wallCenterY - adjustedWallHeight / 2, backZ),  // bottom-back
-      new THREE.Vector3(-wallDistance, wallCenterY - adjustedWallHeight / 2, frontZ), // bottom-front
-      new THREE.Vector3(-wallDistance, wallCenterY + adjustedWallHeight / 2, backZ),  // top-back
-      new THREE.Vector3(-wallDistance, wallCenterY + adjustedWallHeight / 2, frontZ), // top-front
+      new THREE.Vector3(
+        -wallDistance,
+        wallCenterY - adjustedWallHeight / 2,
+        backZ
+      ), // bottom-back
+      new THREE.Vector3(
+        -wallDistance,
+        wallCenterY - adjustedWallHeight / 2,
+        frontZ
+      ), // bottom-front
+      new THREE.Vector3(
+        -wallDistance,
+        wallCenterY + adjustedWallHeight / 2,
+        backZ
+      ), // top-back
+      new THREE.Vector3(
+        -wallDistance,
+        wallCenterY + adjustedWallHeight / 2,
+        frontZ
+      ), // top-front
     ];
-  } else { // facing === 'right'
+  } else {
+    // facing === 'right'
     // Right wall - vertical plane at x = wallDistance, extends in Z
     wallCorners = [
-      new THREE.Vector3(wallDistance, wallCenterY - adjustedWallHeight / 2, frontZ), // bottom-front
-      new THREE.Vector3(wallDistance, wallCenterY - adjustedWallHeight / 2, backZ),  // bottom-back
-      new THREE.Vector3(wallDistance, wallCenterY + adjustedWallHeight / 2, frontZ), // top-front
-      new THREE.Vector3(wallDistance, wallCenterY + adjustedWallHeight / 2, backZ),  // top-back
+      new THREE.Vector3(
+        wallDistance,
+        wallCenterY - adjustedWallHeight / 2,
+        frontZ
+      ), // bottom-front
+      new THREE.Vector3(
+        wallDistance,
+        wallCenterY - adjustedWallHeight / 2,
+        backZ
+      ), // bottom-back
+      new THREE.Vector3(
+        wallDistance,
+        wallCenterY + adjustedWallHeight / 2,
+        frontZ
+      ), // top-front
+      new THREE.Vector3(
+        wallDistance,
+        wallCenterY + adjustedWallHeight / 2,
+        backZ
+      ), // top-back
     ];
   }
 
   // Project to screen space (-1 to 1 in NDC)
-  const screenCorners = wallCorners.map(corner => {
+  const screenCorners = wallCorners.map((corner) => {
     const projected = corner.clone().project(perspectiveCamera);
     return {
       x: (projected.x + 1) * 0.5 * canvasWidth,
@@ -86,8 +155,8 @@ function calculateWallBounds(
   });
 
   // Find bounding box
-  const xs = screenCorners.map(c => c.x);
-  const ys = screenCorners.map(c => c.y);
+  const xs = screenCorners.map((c) => c.x);
+  const ys = screenCorners.map((c) => c.y);
 
   return {
     minX: Math.min(...xs),
@@ -187,15 +256,15 @@ function StallGeometry({
 }) {
   // Create stable keys for memoization based on graffiti content
   const frontKey = useMemo(
-    () => graffiti.front.map(g => `${g.id}-${g.opacity}`).join(','),
+    () => graffiti.front.map((g) => `${g.id}-${g.opacity}`).join(","),
     [graffiti.front]
   );
   const leftKey = useMemo(
-    () => graffiti.left.map(g => `${g.id}-${g.opacity}`).join(','),
+    () => graffiti.left.map((g) => `${g.id}-${g.opacity}`).join(","),
     [graffiti.left]
   );
   const rightKey = useMemo(
-    () => graffiti.right.map(g => `${g.id}-${g.opacity}`).join(','),
+    () => graffiti.right.map((g) => `${g.id}-${g.opacity}`).join(","),
     [graffiti.right]
   );
 
@@ -236,20 +305,23 @@ function StallGeometry({
       {/* Front wall (door) - at the FRONT edge of the side walls */}
       <mesh position={[0, wallCenterY, frontZ]} rotation={[0, 0, 0]}>
         <planeGeometry args={[stallWidth, adjustedWallHeight]} />
-        <meshLambertMaterial
-          map={frontTexture}
-          side={THREE.FrontSide}
-        />
+        <meshLambertMaterial map={frontTexture} side={THREE.FrontSide} />
       </mesh>
 
       {/* Left wall - extends from back to front (where door is) */}
-      <mesh position={[-wallDistance, wallCenterY, (backZ + frontZ) / 2]} rotation={[0, Math.PI / 2, 0]}>
+      <mesh
+        position={[-wallDistance, wallCenterY, (backZ + frontZ) / 2]}
+        rotation={[0, Math.PI / 2, 0]}
+      >
         <planeGeometry args={[stallDepth, adjustedWallHeight]} />
         <meshLambertMaterial map={leftTexture} side={THREE.FrontSide} />
       </mesh>
 
       {/* Right wall - extends from back to front (where door is) */}
-      <mesh position={[wallDistance, wallCenterY, (backZ + frontZ) / 2]} rotation={[0, -Math.PI / 2, 0]}>
+      <mesh
+        position={[wallDistance, wallCenterY, (backZ + frontZ) / 2]}
+        rotation={[0, -Math.PI / 2, 0]}
+      >
         <planeGeometry args={[stallDepth, adjustedWallHeight]} />
         <meshLambertMaterial map={rightTexture} side={THREE.FrontSide} />
       </mesh>
@@ -261,13 +333,19 @@ function StallGeometry({
       </mesh>
 
       {/* Extended floor - covers entire visible area */}
-      <mesh position={[0, -wallHeight / 2, (backZ + frontZ) / 2]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh
+        position={[0, -wallHeight / 2, (backZ + frontZ) / 2]}
+        rotation={[-Math.PI / 2, 0, 0]}
+      >
         <planeGeometry args={[extendedFloorWidth, extendedFloorDepth]} />
         <meshLambertMaterial map={floorTexture} side={THREE.FrontSide} />
       </mesh>
 
       {/* Extended ceiling - covers entire visible area */}
-      <mesh position={[0, wallHeight / 2, (backZ + frontZ) / 2]} rotation={[Math.PI / 2, 0, 0]}>
+      <mesh
+        position={[0, wallHeight / 2, (backZ + frontZ) / 2]}
+        rotation={[Math.PI / 2, 0, 0]}
+      >
         <planeGeometry args={[extendedFloorWidth, extendedFloorDepth]} />
         <meshLambertMaterial map={ceilingTexture} side={THREE.FrontSide} />
       </mesh>
@@ -279,9 +357,9 @@ export function StallView3D({
   onSubmit,
   stallRef,
   debugUnlimitedPosting = false,
-  onDebugUnlimitedPostingChange
+  onDebugUnlimitedPostingChange,
 }: StallView3DProps) {
-  const [facing, setFacing] = useState<FacingDirection>('front');
+  const [facing, setFacing] = useState<FacingDirection>("front");
   const [graffiti, setGraffiti] = useState<Record<WallType, Graffiti[]>>({
     front: [],
     left: [],
@@ -291,8 +369,27 @@ export function StallView3D({
   const [isLoading, setIsLoading] = useState(true);
   const touchStartX = useRef<number | null>(null);
 
+  // Random message on mount (client-side only to avoid hydration mismatch)
+  const HEADER_MESSAGES = [
+    "You're here anyway. Might as well leave your mark",
+    "For a good time, draw here",
+    "Time for another shitpost",
+    "Express yourself (management hates it)",
+    "The stall provides; the stall taketh away",
+    "Everyone needs a wall",
+  ];
+  const [headerMessage, setHeaderMessage] = useState(HEADER_MESSAGES[0]);
+
+  // Set random message on mount (client-side only)
+  useEffect(() => {
+    setHeaderMessage(
+      HEADER_MESSAGES[Math.floor(Math.random() * HEADER_MESSAGES.length)]
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Drawing state
-  const [implement, setImplement] = useState<ImplementType>('scribble');
+  const [implement, setImplement] = useState<ImplementType>("scribble");
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [currentStroke, setCurrentStroke] = useState<StrokePoint[]>([]);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -302,7 +399,10 @@ export function StallView3D({
   const cameraRef = useRef<THREE.Camera | null>(null);
 
   // Track canvas dimensions for texture generation
-  const [canvasDimensions, setCanvasDimensions] = useState({ width: 480, height: 736 });
+  const [canvasDimensions, setCanvasDimensions] = useState({
+    width: 480,
+    height: 736,
+  });
 
   // Debug controls
   const [showDebug, setShowDebug] = useState(false);
@@ -312,14 +412,17 @@ export function StallView3D({
   const [wallHeight, setWallHeight] = useState(2.0);
 
   // Expose graffiti getter via ref so parent can access current wall graffiti
-  const getWallGraffiti = useCallback((wall: WallType): Graffiti[] => {
-    return graffiti[wall];
-  }, [graffiti]);
+  const getWallGraffiti = useCallback(
+    (wall: WallType): Graffiti[] => {
+      return graffiti[wall];
+    },
+    [graffiti]
+  );
 
   // Fetch graffiti for all walls
   const fetchGraffiti = useCallback(async () => {
     try {
-      const walls: WallType[] = ['front', 'left', 'right'];
+      const walls: WallType[] = ["front", "left", "right"];
       const results = await Promise.all(
         walls.map(async (wall) => {
           const res = await fetch(`/api/graffiti?wall=${wall}`);
@@ -340,20 +443,20 @@ export function StallView3D({
       setGraffiti(newGraffiti);
       setIsLoading(false);
     } catch (error) {
-      console.error('Failed to fetch graffiti:', error);
+      console.error("Failed to fetch graffiti:", error);
       setIsLoading(false);
     }
   }, []);
 
   // Clear all graffiti from database
   const clearAllGraffiti = useCallback(async () => {
-    if (!confirm('Clear all graffiti from all walls? This cannot be undone.')) {
+    if (!confirm("Clear all graffiti from all walls? This cannot be undone.")) {
       return;
     }
 
     try {
-      const response = await fetch('/api/graffiti/clear', {
-        method: 'POST',
+      const response = await fetch("/api/graffiti/clear", {
+        method: "POST",
       });
 
       if (response.ok) {
@@ -363,22 +466,25 @@ export function StallView3D({
           left: [],
           right: [],
         });
-        console.log('All graffiti cleared');
+        console.log("All graffiti cleared");
       } else {
-        console.error('Failed to clear graffiti');
+        console.error("Failed to clear graffiti");
       }
     } catch (error) {
-      console.error('Error clearing graffiti:', error);
+      console.error("Error clearing graffiti:", error);
     }
   }, []);
 
   // Add graffiti instantly (called from DrawingMode)
-  const addLocalGraffiti = useCallback((wall: WallType, newGraffiti: Graffiti) => {
-    setGraffiti((prev) => ({
-      ...prev,
-      [wall]: [...prev[wall], newGraffiti],
-    }));
-  }, []);
+  const addLocalGraffiti = useCallback(
+    (wall: WallType, newGraffiti: Graffiti) => {
+      setGraffiti((prev) => ({
+        ...prev,
+        [wall]: [...prev[wall], newGraffiti],
+      }));
+    },
+    []
+  );
 
   // Expose methods via ref
   useEffect(() => {
@@ -395,42 +501,45 @@ export function StallView3D({
   }, [fetchGraffiti]);
 
   // Rotation logic
-  const rotate = useCallback((direction: 'left' | 'right') => {
-    if (isTransitioning) return;
+  const rotate = useCallback(
+    (direction: "left" | "right") => {
+      if (isTransitioning) return;
 
-    setIsTransitioning(true);
-    setFacing((prev) => {
-      // Turn head right = see right wall
-      if (direction === 'right') {
-        if (prev === 'front') return 'right';
-        if (prev === 'left') return 'front';
-        if (prev === 'right') return 'left';
-      } else {
-        // Turn head left = see left wall
-        if (prev === 'front') return 'left';
-        if (prev === 'right') return 'front';
-        if (prev === 'left') return 'right';
-      }
-      return prev;
-    });
-  }, [isTransitioning]);
+      setIsTransitioning(true);
+      setFacing((prev) => {
+        // Turn head right = see right wall
+        if (direction === "right") {
+          if (prev === "front") return "right";
+          if (prev === "left") return "front";
+          if (prev === "right") return "left";
+        } else {
+          // Turn head left = see left wall
+          if (prev === "front") return "left";
+          if (prev === "right") return "front";
+          if (prev === "left") return "right";
+        }
+        return prev;
+      });
+    },
+    [isTransitioning]
+  );
 
   // Keyboard controls
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === '`') {
+      if (e.key === "`") {
         e.preventDefault();
-        setShowDebug(prev => !prev);
-      } else if (e.key === 'ArrowLeft') {
+        setShowDebug((prev) => !prev);
+      } else if (e.key === "ArrowLeft") {
         e.preventDefault();
-        rotate('left');
-      } else if (e.key === 'ArrowRight') {
+        rotate("left");
+      } else if (e.key === "ArrowRight") {
         e.preventDefault();
-        rotate('right');
+        rotate("right");
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [rotate]);
 
   // Canvas setup for drawing
@@ -439,10 +548,11 @@ export function StallView3D({
     if (!canvas) return;
 
     const resizeCanvas = () => {
-      const dpr = window.devicePixelRatio || 1;
+      // Cap DPR at 2 to match texture generation
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
       canvas.width = canvas.clientWidth * dpr;
       canvas.height = canvas.clientHeight * dpr;
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext("2d");
       if (ctx) {
         ctx.scale(dpr, dpr);
       }
@@ -450,13 +560,13 @@ export function StallView3D({
       // Update dimensions for texture generation
       setCanvasDimensions({
         width: canvas.clientWidth,
-        height: canvas.clientHeight
+        height: canvas.clientHeight,
       });
     };
 
     resizeCanvas();
-    window.addEventListener('resize', resizeCanvas);
-    return () => window.removeEventListener('resize', resizeCanvas);
+    window.addEventListener("resize", resizeCanvas);
+    return () => window.removeEventListener("resize", resizeCanvas);
   }, []);
 
   // Clear preview strokes when graffiti is added to 3D texture
@@ -473,7 +583,7 @@ export function StallView3D({
     const camera = cameraRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     // Clear using client dimensions (CSS dimensions) since context is scaled by DPR
@@ -482,7 +592,7 @@ export function StallView3D({
     ctx.clearRect(0, 0, width, height);
 
     // Render current drawing strokes
-    const allStrokes = [...strokes, currentStroke].filter(s => s.length >= 2);
+    const allStrokes = [...strokes, currentStroke].filter((s) => s.length >= 2);
     const graffitiToRender: Graffiti[] = allStrokes.map((stroke, i) => ({
       id: `temp-${i}`,
       wall: facing,
@@ -496,7 +606,14 @@ export function StallView3D({
 
     // For all walls, render within wall bounds to match 3D texture
     if (camera) {
-      const wallBounds = calculateWallBounds(camera, width, height, wallDistance, wallHeight, facing);
+      const wallBounds = calculateWallBounds(
+        camera,
+        width,
+        height,
+        wallDistance,
+        wallHeight,
+        facing
+      );
 
       if (wallBounds) {
         // Save context state
@@ -520,73 +637,99 @@ export function StallView3D({
   }, [strokes, currentStroke, implement, facing, wallDistance, wallHeight]);
 
   // Drawing handlers
-  const getPointFromEvent = useCallback((clientX: number, clientY: number): StrokePoint | null => {
-    const canvas = canvasRef.current;
-    const camera = cameraRef.current;
-    if (!canvas || !camera) return null;
+  const getPointFromEvent = useCallback(
+    (clientX: number, clientY: number): StrokePoint | null => {
+      const canvas = canvasRef.current;
+      const camera = cameraRef.current;
+      if (!canvas || !camera) return null;
 
-    const rect = canvas.getBoundingClientRect();
+      const rect = canvas.getBoundingClientRect();
 
-    // Calculate wall bounds for current facing direction
-    const wallBounds = calculateWallBounds(
-      camera,
-      rect.width,
-      rect.height,
-      wallDistance,
-      wallHeight,
-      facing
-    );
+      // Calculate wall bounds for current facing direction
+      const wallBounds = calculateWallBounds(
+        camera,
+        rect.width,
+        rect.height,
+        wallDistance,
+        wallHeight,
+        facing
+      );
 
-    if (wallBounds) {
-      // Convert client coordinates to canvas-relative coordinates
-      const canvasX = clientX - rect.left;
-      const canvasY = clientY - rect.top;
+      if (wallBounds) {
+        // Convert client coordinates to canvas-relative coordinates
+        const canvasX = clientX - rect.left;
+        const canvasY = clientY - rect.top;
 
-      // Normalize relative to wall bounds (0-1 within wall area)
-      const x = (canvasX - wallBounds.minX) / (wallBounds.maxX - wallBounds.minX);
-      const y = (canvasY - wallBounds.minY) / (wallBounds.maxY - wallBounds.minY);
+        // Check if click is within wall bounds
+        if (
+          canvasX < wallBounds.minX ||
+          canvasX > wallBounds.maxX ||
+          canvasY < wallBounds.minY ||
+          canvasY > wallBounds.maxY
+        ) {
+          // Click is outside the wall - ignore it
+          return null;
+        }
 
-      return { x, y };
-    }
+        // Normalize relative to wall bounds (0-1 within wall area)
+        const x =
+          (canvasX - wallBounds.minX) / (wallBounds.maxX - wallBounds.minX);
+        const y =
+          (canvasY - wallBounds.minY) / (wallBounds.maxY - wallBounds.minY);
 
-    // Fallback if calculation fails: normalize to full viewport
-    const x = (clientX - rect.left) / rect.width;
-    const y = (clientY - rect.top) / rect.height;
-
-    return { x, y };
-  }, [facing, wallDistance, wallHeight]);
-
-  const handleDrawStart = useCallback((clientX: number, clientY: number) => {
-    const point = getPointFromEvent(clientX, clientY);
-    if (!point) return;
-
-    setIsDrawing(true);
-    setCurrentStroke([point]);
-    lastPointRef.current = createTimedPoint(point);
-  }, [getPointFromEvent]);
-
-  const handleDrawMove = useCallback((clientX: number, clientY: number) => {
-    if (!isDrawing) return;
-
-    const point = getPointFromEvent(clientX, clientY);
-    if (!point) return;
-
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-
-    // For carved mode, check velocity
-    if (implement === 'carved' && lastPointRef.current) {
-      if (!shouldAcceptPoint(lastPointRef.current, point, rect.width, rect.height)) {
-        lastPointRef.current = createTimedPoint(point);
-        return;
+        return { x, y };
       }
-    }
 
-    setCurrentStroke((prev) => [...prev, point]);
-    lastPointRef.current = createTimedPoint(point);
-  }, [isDrawing, implement, getPointFromEvent]);
+      // If wall bounds calculation fails, don't allow drawing
+      return null;
+    },
+    [facing, wallDistance, wallHeight]
+  );
+
+  const handleDrawStart = useCallback(
+    (clientX: number, clientY: number) => {
+      const point = getPointFromEvent(clientX, clientY);
+      if (!point) return;
+
+      setIsDrawing(true);
+      setCurrentStroke([point]);
+      lastPointRef.current = createTimedPoint(point);
+    },
+    [getPointFromEvent]
+  );
+
+  const handleDrawMove = useCallback(
+    (clientX: number, clientY: number) => {
+      if (!isDrawing) return;
+
+      const point = getPointFromEvent(clientX, clientY);
+      if (!point) return;
+
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const rect = canvas.getBoundingClientRect();
+
+      // For carved mode, check velocity
+      if (implement === "carved" && lastPointRef.current) {
+        if (
+          !shouldAcceptPoint(
+            lastPointRef.current,
+            point,
+            rect.width,
+            rect.height
+          )
+        ) {
+          lastPointRef.current = createTimedPoint(point);
+          return;
+        }
+      }
+
+      setCurrentStroke((prev) => [...prev, point]);
+      lastPointRef.current = createTimedPoint(point);
+    },
+    [isDrawing, implement, getPointFromEvent]
+  );
 
   const handleDrawEnd = useCallback(() => {
     if (!isDrawing) return;
@@ -607,12 +750,20 @@ export function StallView3D({
           wallHeight,
           facing
         );
-        console.log('=== DRAW END ===');
-        console.log('Wall:', facing);
-        console.log('Canvas dimensions:', canvas.clientWidth, 'x', canvas.clientHeight);
-        console.log('Wall bounds (pixels):', wallBounds);
-        console.log('First stroke point (0-1 within wall):', currentStroke[0]);
-        console.log('Last stroke point (0-1 within wall):', currentStroke[currentStroke.length - 1]);
+        console.log("=== DRAW END ===");
+        console.log("Wall:", facing);
+        console.log(
+          "Canvas dimensions:",
+          canvas.clientWidth,
+          "x",
+          canvas.clientHeight
+        );
+        console.log("Wall bounds (pixels):", wallBounds);
+        console.log("First stroke point (0-1 within wall):", currentStroke[0]);
+        console.log(
+          "Last stroke point (0-1 within wall):",
+          currentStroke[currentStroke.length - 1]
+        );
       }
 
       // Auto-submit with raw coordinates (no transformation)
@@ -643,7 +794,7 @@ export function StallView3D({
 
     // Only rotate if it was a swipe (and not a draw)
     if (!isDrawing && Math.abs(diff) > threshold && !isTransitioning) {
-      rotate(diff > 0 ? 'left' : 'right');
+      rotate(diff > 0 ? "left" : "right");
     }
 
     handleDrawEnd();
@@ -675,8 +826,11 @@ export function StallView3D({
       handleDrawMove(touch.clientX, touch.clientY);
     };
 
-    container.addEventListener('touchmove', handleTouchMoveNonPassive, { passive: false });
-    return () => container.removeEventListener('touchmove', handleTouchMoveNonPassive);
+    container.addEventListener("touchmove", handleTouchMoveNonPassive, {
+      passive: false,
+    });
+    return () =>
+      container.removeEventListener("touchmove", handleTouchMoveNonPassive);
   }, [handleDrawMove]);
 
   const targetRotation = FACING_TO_ROTATION[facing];
@@ -693,7 +847,7 @@ export function StallView3D({
           fov: fov,
           near: 0.1,
           far: 100,
-          position: [0, cameraY, 0]
+          position: [0, cameraY, 0],
         }}
         gl={{ antialias: true }}
       >
@@ -703,7 +857,9 @@ export function StallView3D({
           setIsTransitioning={setIsTransitioning}
           cameraY={cameraY}
           fov={fov}
-          onCameraReady={(camera) => { cameraRef.current = camera; }}
+          onCameraReady={(camera) => {
+            cameraRef.current = camera;
+          }}
         />
 
         {/* Ambient lighting - brighten to see floor gap clearly */}
@@ -713,7 +869,11 @@ export function StallView3D({
         <directionalLight position={[0, 2, 0]} intensity={0.4} />
 
         {/* Subtle light from below to show floor continues under walls */}
-        <directionalLight position={[0, -1, 0]} intensity={0.15} color="#f0e8d8" />
+        <directionalLight
+          position={[0, -1, 0]}
+          intensity={0.15}
+          color="#f0e8d8"
+        />
 
         <StallGeometry
           graffiti={graffiti}
@@ -727,16 +887,19 @@ export function StallView3D({
       {/* Loading indicator */}
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-40">
-          <div className="text-[#999] text-sm">
-            Loading graffiti...
-          </div>
+          <div className="text-[#999] text-sm">Loading graffiti...</div>
         </div>
       )}
 
       {/* UI Overlay */}
-      <div
-        className="absolute inset-0 pointer-events-none flex flex-col"
-      >
+      <div className="absolute inset-0 pointer-events-none flex flex-col">
+        {/* Header message */}
+        <div className="absolute top-6 left-1/2 -translate-x-1/2 pointer-events-none z-10">
+          <p className="text-[#a39e94] text-sm font-medium tracking-wide text-center px-4">
+            {headerMessage}
+          </p>
+        </div>
+
         {/* Drawing canvas overlay - positioned above 3D canvas */}
         <canvas
           ref={canvasRef}
@@ -748,28 +911,48 @@ export function StallView3D({
         />
 
         {/* Navigation arrows - hide left arrow at left wall, hide right arrow at right wall */}
-        {facing !== 'left' && (
+        {facing !== "left" && (
           <button
-            onClick={() => rotate('left')}
+            onClick={() => rotate("left")}
             disabled={isTransitioning}
-            className="absolute left-4 top-1/2 -translate-y-1/2 w-12 h-12 flex items-center justify-center text-white/50 hover:text-white/80 transition-colors pointer-events-auto disabled:opacity-30"
+            className="absolute left-4 top-1/2 -translate-y-1/2 w-14 h-14 flex items-center justify-center bg-[#2b2d2f]/70 backdrop-blur-sm rounded-full border border-white/10 text-white/60 hover:text-white hover:bg-[#54585c]/80 transition-all duration-200 pointer-events-auto disabled:opacity-20 disabled:cursor-not-allowed hover:scale-110 active:scale-95 shadow-lg"
             aria-label="Look left"
           >
-            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            <svg
+              className="w-7 h-7"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              strokeWidth={2.5}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M15 19l-7-7 7-7"
+              />
             </svg>
           </button>
         )}
 
-        {facing !== 'right' && (
+        {facing !== "right" && (
           <button
-            onClick={() => rotate('right')}
+            onClick={() => rotate("right")}
             disabled={isTransitioning}
-            className="absolute right-4 top-1/2 -translate-y-1/2 w-12 h-12 flex items-center justify-center text-white/50 hover:text-white/80 transition-colors pointer-events-auto disabled:opacity-30"
+            className="absolute right-4 top-1/2 -translate-y-1/2 w-14 h-14 flex items-center justify-center bg-[#2b2d2f]/70 backdrop-blur-sm rounded-full border border-white/10 text-white/60 hover:text-white hover:bg-[#54585c]/80 transition-all duration-200 pointer-events-auto disabled:opacity-20 disabled:cursor-not-allowed hover:scale-110 active:scale-95 shadow-lg"
             aria-label="Look right"
           >
-            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            <svg
+              className="w-7 h-7"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              strokeWidth={2.5}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M9 5l7 7-7 7"
+              />
             </svg>
           </button>
         )}
@@ -789,9 +972,7 @@ export function StallView3D({
 
           <div className="space-y-3">
             <div>
-              <label className="block mb-1 text-white/70">
-                FOV: {fov}°
-              </label>
+              <label className="block mb-1 text-white/70">FOV: {fov}°</label>
               <div className="text-[10px] text-white/40 mb-1">
                 Field of view (wider = see more)
               </div>
@@ -860,8 +1041,10 @@ export function StallView3D({
             </div>
 
             <div className="pt-2 border-t border-white/20 text-white/50 text-[10px] leading-tight">
-              Facing: {facing}<br/>
-              Camera at (0, {cameraY.toFixed(2)}, 0)<br/>
+              Facing: {facing}
+              <br />
+              Camera at (0, {cameraY.toFixed(2)}, 0)
+              <br />
               Front wall at Z=-{wallDistance.toFixed(1)}
             </div>
 
@@ -871,10 +1054,14 @@ export function StallView3D({
                 <input
                   type="checkbox"
                   checked={debugUnlimitedPosting}
-                  onChange={(e) => onDebugUnlimitedPostingChange?.(e.target.checked)}
+                  onChange={(e) =>
+                    onDebugUnlimitedPostingChange?.(e.target.checked)
+                  }
                   className="w-4 h-4"
                 />
-                <span className="text-white/70 text-xs">Unlimited posting (bypass session limit)</span>
+                <span className="text-white/70 text-xs">
+                  Unlimited posting (bypass session limit)
+                </span>
               </label>
             </div>
 

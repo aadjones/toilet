@@ -170,8 +170,8 @@ function renderToiletPaperDispenser(
   // When looking LEFT, texture coordinates are reversed:
   // Left edge (0%) = FRONT/door (Z=-0.6), Right edge (100%) = BACK (Z=1.8)
   // Camera at Z=1.2, which is close to the back
-  // Need dispenser at ~25% (which maps to Z=1.2 from the camera position)
-  const dispenserX = width * 0.25;  // 25% from left edge (near camera position)
+  // Position at ~15% to ensure it's fully visible when the wall is rotated
+  const dispenserX = width * 0.15;  // 15% from left edge (moved left for better visibility)
   const dispenserY = height * 0.48; // 48% from top (mid-torso level when seated)
   const dispenserW = width * 0.12;
   const dispenserH = height * 0.08;

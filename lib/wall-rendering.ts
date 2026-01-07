@@ -29,6 +29,12 @@ export function renderGraffitiStrokes(
     ctx.lineJoin = style.lineJoin;
     ctx.globalAlpha = g.opacity;
 
+    // Apply shadow for depth (marker and carved)
+    ctx.shadowBlur = style.shadowBlur;
+    ctx.shadowColor = style.shadowColor;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+
     if (g.implement === 'carved') {
       ctx.setLineDash([2, 1]);
     } else {
@@ -70,6 +76,8 @@ export function renderGraffitiStrokes(
   // Reset context state
   ctx.globalAlpha = 1;
   ctx.setLineDash([]);
+  ctx.shadowBlur = 0;
+  ctx.shadowColor = 'transparent';
 }
 
 /**
