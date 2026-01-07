@@ -46,6 +46,44 @@ const FACING_TO_ROTATION: Record<FacingDirection, number> = {
   right: -Math.PI / 2, // 90 degrees right
 };
 
+// Helper to check if a point is near a stroke (within threshold distance)
+function isPointNearStroke(
+  point: StrokePoint,
+  stroke: Stroke,
+  threshold: number = 0.05 // 5% of canvas dimension
+): boolean {
+  for (let i = 0; i < stroke.length - 1; i++) {
+    const p1 = stroke[i];
+    const p2 = stroke[i + 1];
+
+    // Calculate distance from point to line segment
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const lengthSquared = dx * dx + dy * dy;
+
+    if (lengthSquared === 0) {
+      // Point to point distance
+      const dist = Math.sqrt(
+        (point.x - p1.x) ** 2 + (point.y - p1.y) ** 2
+      );
+      if (dist < threshold) return true;
+    } else {
+      // Point to line segment distance
+      let t = ((point.x - p1.x) * dx + (point.y - p1.y) * dy) / lengthSquared;
+      t = Math.max(0, Math.min(1, t));
+
+      const projX = p1.x + t * dx;
+      const projY = p1.y + t * dy;
+      const dist = Math.sqrt(
+        (point.x - projX) ** 2 + (point.y - projY) ** 2
+      );
+
+      if (dist < threshold) return true;
+    }
+  }
+  return false;
+}
+
 // Helper to calculate screen-space bounding box of a wall based on facing direction
 function calculateWallBounds(
   camera: THREE.Camera,
@@ -410,6 +448,8 @@ export function StallView3D({
   const [cameraY, setCameraY] = useState(0.25); // Eye height from user's preferred settings
   const [wallDistance, setWallDistance] = useState(0.5); // Wall distance from user's preferred settings
   const [wallHeight, setWallHeight] = useState(2.0);
+  const [selectorMode, setSelectorMode] = useState(false);
+  const [selectedGraffiti, setSelectedGraffiti] = useState<Graffiti[]>([]);
 
   // Expose graffiti getter via ref so parent can access current wall graffiti
   const getWallGraffiti = useCallback(
@@ -448,6 +488,33 @@ export function StallView3D({
     }
   }, []);
 
+  // Delete specific graffiti by ID
+  const deleteGraffiti = useCallback(async (id: string) => {
+    try {
+      const response = await fetch("/api/graffiti/delete", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+
+      if (response.ok) {
+        // Remove from local state
+        setGraffiti((prev) => ({
+          front: prev.front.filter((g) => g.id !== id),
+          left: prev.left.filter((g) => g.id !== id),
+          right: prev.right.filter((g) => g.id !== id),
+        }));
+        // Remove from selected list if present
+        setSelectedGraffiti((prev) => prev.filter((g) => g.id !== id));
+        console.log("Graffiti deleted:", id);
+      } else {
+        console.error("Failed to delete graffiti");
+      }
+    } catch (error) {
+      console.error("Error deleting graffiti:", error);
+    }
+  }, []);
+
   // Clear all graffiti from database
   const clearAllGraffiti = useCallback(async () => {
     if (!confirm("Clear all graffiti from all walls? This cannot be undone.")) {
@@ -466,6 +533,7 @@ export function StallView3D({
           left: [],
           right: [],
         });
+        setSelectedGraffiti([]);
         console.log("All graffiti cleared");
       } else {
         console.error("Failed to clear graffiti");
@@ -691,16 +759,36 @@ export function StallView3D({
       const point = getPointFromEvent(clientX, clientY);
       if (!point) return;
 
+      // If in selector mode, find graffiti near this point
+      if (selectorMode) {
+        const currentWallGraffiti = graffiti[facing];
+        const matches: Graffiti[] = [];
+
+        currentWallGraffiti.forEach((g) => {
+          g.strokeData.forEach((stroke) => {
+            if (isPointNearStroke(point, stroke, 0.05)) {
+              if (!matches.find((m) => m.id === g.id)) {
+                matches.push(g);
+              }
+            }
+          });
+        });
+
+        setSelectedGraffiti(matches);
+        return;
+      }
+
+      // Normal drawing mode
       setIsDrawing(true);
       setCurrentStroke([point]);
       lastPointRef.current = createTimedPoint(point);
     },
-    [getPointFromEvent]
+    [getPointFromEvent, selectorMode, graffiti, facing]
   );
 
   const handleDrawMove = useCallback(
     (clientX: number, clientY: number) => {
-      if (!isDrawing) return;
+      if (!isDrawing || selectorMode) return;
 
       const point = getPointFromEvent(clientX, clientY);
       if (!point) return;
@@ -728,7 +816,7 @@ export function StallView3D({
       setCurrentStroke((prev) => [...prev, point]);
       lastPointRef.current = createTimedPoint(point);
     },
-    [isDrawing, implement, getPointFromEvent]
+    [isDrawing, implement, getPointFromEvent, selectorMode]
   );
 
   const handleDrawEnd = useCallback(() => {
@@ -1063,7 +1151,56 @@ export function StallView3D({
                   Unlimited posting (bypass session limit)
                 </span>
               </label>
+
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={selectorMode}
+                  onChange={(e) => {
+                    setSelectorMode(e.target.checked);
+                    if (!e.target.checked) {
+                      setSelectedGraffiti([]);
+                    }
+                  }}
+                  className="w-4 h-4"
+                />
+                <span className="text-white/70 text-xs">
+                  Selector mode (click to find graffiti)
+                </span>
+              </label>
             </div>
+
+            {/* Selected graffiti list */}
+            {selectorMode && selectedGraffiti.length > 0 && (
+              <div className="pt-3 border-t border-white/20">
+                <div className="text-white/70 text-xs font-semibold mb-2">
+                  Found {selectedGraffiti.length} graffiti at clicked point:
+                </div>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                  {selectedGraffiti.map((g) => (
+                    <div
+                      key={g.id}
+                      className="bg-white/5 rounded px-2 py-1.5 flex items-center justify-between gap-2"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[10px] text-white/50 truncate">
+                          {g.id}
+                        </div>
+                        <div className="text-[9px] text-white/40">
+                          {g.implement} • {g.strokeData.length} stroke(s)
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => deleteGraffiti(g.id)}
+                        className="bg-red-600/80 hover:bg-red-600 text-white px-2 py-1 rounded text-[10px] font-semibold transition-colors flex-shrink-0"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Clear all graffiti button */}
             <div className="pt-3 border-t border-white/20">
