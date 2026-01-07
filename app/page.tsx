@@ -8,11 +8,13 @@ import {
   recordActivity,
   hasPostedThisSession,
   markAsPosted,
+  resetPostedFlag,
 } from '@/lib/session';
 import { type WallType, type ImplementType, type Stroke, type Graffiti, IMPLEMENT_STYLES, DECAY_DURATIONS } from '@/lib/config';
 
 export default function Home() {
   const [message, setMessage] = useState<string | null>(null);
+  const [debugUnlimitedPosting, setDebugUnlimitedPosting] = useState(false);
   const stallRef = useRef<{
     addLocalGraffiti: (wall: WallType, graffiti: Graffiti) => void;
     getWallGraffiti: (wall: WallType) => Graffiti[];
@@ -37,7 +39,8 @@ export default function Home() {
   }, []);
 
   const handleSubmit = useCallback(async (wall: WallType, strokeData: Stroke[], implement: ImplementType) => {
-    if (hasPostedThisSession()) {
+    // Check session limit unless debug mode is enabled
+    if (!debugUnlimitedPosting && hasPostedThisSession()) {
       setMessage('You already left your mark.');
       setTimeout(() => setMessage(null), 2000);
       return;
@@ -74,9 +77,15 @@ export default function Home() {
         // Render graffiti instantly
         stallRef.current?.addLocalGraffiti(wall, newGraffiti);
 
+        // Mark as posted (but will be reset immediately if debug mode is on)
         markAsPosted();
-        setMessage('Marked.');
-        setTimeout(() => setMessage(null), 1500);
+
+        // If debug unlimited posting is enabled, reset the flag immediately
+        if (debugUnlimitedPosting) {
+          resetPostedFlag();
+        }
+
+        // No message - graffiti appears instantly, no need to announce it
       } else {
         console.error('Failed to submit graffiti');
         setMessage('Something went wrong.');
@@ -87,14 +96,19 @@ export default function Home() {
       setMessage('Something went wrong.');
       setTimeout(() => setMessage(null), 2000);
     }
-  }, []);
+  }, [debugUnlimitedPosting]);
 
   return (
     <main className="fixed inset-0 overflow-hidden select-none bg-black flex items-center justify-center">
       <ErrorBoundary>
         {/* Constrain to mobile aspect ratio even on desktop */}
         <div className="w-full h-full max-w-[480px] relative">
-          <StallView3D stallRef={stallRef} onSubmit={handleSubmit} />
+          <StallView3D
+            stallRef={stallRef}
+            onSubmit={handleSubmit}
+            debugUnlimitedPosting={debugUnlimitedPosting}
+            onDebugUnlimitedPostingChange={setDebugUnlimitedPosting}
+          />
         </div>
       </ErrorBoundary>
 

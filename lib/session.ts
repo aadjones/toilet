@@ -2,6 +2,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { SESSION_TIMEOUT_MS } from './config';
+import { FEATURE_FLAGS } from './feature-flags';
 
 const SESSION_ID_KEY = 'stall_session_id';
 const LAST_ACTIVITY_KEY = 'stall_last_activity';
@@ -16,7 +17,11 @@ export function getSessionId(): string {
   let sessionId = sessionStorage.getItem(SESSION_ID_KEY);
 
   // Reset session if inactive for too long or no session exists
-  if (!sessionId || (lastActivity && now - lastActivity > SESSION_TIMEOUT_MS)) {
+  const shouldResetSession = FEATURE_FLAGS.ENABLE_SESSION_TIMEOUT &&
+    lastActivity &&
+    now - lastActivity > SESSION_TIMEOUT_MS;
+
+  if (!sessionId || shouldResetSession) {
     sessionId = uuidv4();
     sessionStorage.setItem(SESSION_ID_KEY, sessionId);
     sessionStorage.setItem(HAS_POSTED_KEY, 'false');
@@ -38,6 +43,11 @@ export function recordActivity(): void {
 export function hasPostedThisSession(): boolean {
   if (typeof window === 'undefined') return false;
 
+  // If session post limit is disabled, always return false
+  if (!FEATURE_FLAGS.ENABLE_SESSION_POST_LIMIT) {
+    return false;
+  }
+
   // First, check if session should be reset
   getSessionId();
 
@@ -48,4 +58,10 @@ export function hasPostedThisSession(): boolean {
 export function markAsPosted(): void {
   if (typeof window === 'undefined') return;
   sessionStorage.setItem(HAS_POSTED_KEY, 'true');
+}
+
+// Reset the posted flag (for debug/testing purposes)
+export function resetPostedFlag(): void {
+  if (typeof window === 'undefined') return;
+  sessionStorage.setItem(HAS_POSTED_KEY, 'false');
 }

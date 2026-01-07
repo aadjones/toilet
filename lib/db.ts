@@ -82,3 +82,12 @@ export async function cleanupExpiredGraffiti(): Promise<number> {
 
   return result.rowCount ?? 0;
 }
+
+// Delete all graffiti (for admin/debug purposes)
+export async function deleteAllGraffiti(): Promise<number> {
+  const result = await sql`
+    DELETE FROM graffiti
+  `;
+
+  return result.rowCount ?? 0;
+}

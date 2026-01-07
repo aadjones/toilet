@@ -5,6 +5,10 @@ export const metadata: Metadata = {
   title: "Stall",
   description: "Leave your mark.",
   manifest: "/manifest.json",
+  icons: {
+    icon: '/icon.png',
+    apple: '/icon-192.png',
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",

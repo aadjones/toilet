@@ -1,6 +1,15 @@
 import { type Graffiti, type ImplementType, IMPLEMENT_STYLES } from './config';
 
 /**
+ * Simple seeded random number generator for consistent scribble wobble.
+ * Returns a value between 0 and 1.
+ */
+function seededRandom(seed: number): number {
+  const x = Math.sin(seed) * 10000;
+  return x - Math.floor(x);
+}
+
+/**
  * Renders graffiti strokes onto a canvas context.
  * This is the single source of truth for how graffiti appears visually.
  * Used by both StallView3D (texture generation) and DrawingMode (live preview).
@@ -11,7 +20,7 @@ export function renderGraffitiStrokes(
   width: number,
   height: number
 ): void {
-  graffiti.forEach((g) => {
+  graffiti.forEach((g, graffitiIndex) => {
     const style = IMPLEMENT_STYLES[g.implement as ImplementType];
 
     ctx.strokeStyle = g.color;
@@ -26,8 +35,16 @@ export function renderGraffitiStrokes(
       ctx.setLineDash([]);
     }
 
-    g.strokeData.forEach((stroke) => {
+    g.strokeData.forEach((stroke, strokeIndex) => {
       if (stroke.length < 2) return;
+
+      // DEBUG: Only log for texture canvas, not preview
+      if (graffitiIndex === graffiti.length - 1 && strokeIndex === 0 && width !== 480) {
+        console.log('=== TEXTURE RENDERING ===');
+        console.log('Texture dimensions:', width, 'x', height);
+        console.log('First point (pixels):', { x: stroke[0].x * width, y: stroke[0].y * height });
+        console.log('Last point (pixels):', { x: stroke[stroke.length - 1].x * width, y: stroke[stroke.length - 1].y * height });
+      }
 
       ctx.beginPath();
       ctx.moveTo(stroke[0].x * width, stroke[0].y * height);
@@ -37,7 +54,9 @@ export function renderGraffitiStrokes(
         const y = stroke[i].y * height;
 
         if (g.implement === 'scribble') {
-          const wobble = (Math.random() - 0.5) * 1;
+          // Use seeded random based on graffiti ID and point index for consistency
+          const seed = (g.id.charCodeAt(0) || 0) * 1000 + strokeIndex * 100 + i;
+          const wobble = (seededRandom(seed) - 0.5) * 1;
           ctx.lineTo(x + wobble, y + wobble);
         } else {
           ctx.lineTo(x, y);

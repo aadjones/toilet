@@ -3,13 +3,17 @@
 import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { type Graffiti, type WallType, type Stroke, type StrokePoint, type ImplementType, POLL_INTERVAL_MS, IMPLEMENT_STYLES, CARVE_VELOCITY_THRESHOLD } from '@/lib/config';
-import { renderGraffitiStrokes, calculateOpacity } from '@/lib/wall-rendering';
+import { type Graffiti, type WallType, type Stroke, type StrokePoint, type ImplementType, POLL_INTERVAL_MS, IMPLEMENT_STYLES } from '@/lib/config';
+import { renderGraffitiStrokes } from '@/lib/wall-rendering';
 import { ImplementPicker } from './ImplementPicker';
+import { createWallTexture, createDoorTexture, createFloorTexture, createCeilingTexture } from '@/lib/texture-generation';
+import { shouldAcceptPoint, createTimedPoint, type TimedPoint } from '@/lib/velocity-gating';
 
 interface StallView3DProps {
   onSubmit: (wall: WallType, strokeData: Stroke[], implement: ImplementType) => void;
   stallRef?: React.MutableRefObject<any>;
+  debugUnlimitedPosting?: boolean;
+  onDebugUnlimitedPostingChange?: (enabled: boolean) => void;
 }
 
 type FacingDirection = 'front' | 'left' | 'right';
@@ -21,139 +25,76 @@ const FACING_TO_ROTATION: Record<FacingDirection, number> = {
   right: -Math.PI / 2,  // 90 degrees right
 };
 
-// Wall texture creation with graffiti
-function createWallTexture(
-  graffiti: Graffiti[],
-  width: number,
-  height: number,
-  showLock: boolean = false
-): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas');
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  canvas.width = width * dpr;
-  canvas.height = height * dpr;
 
-  const ctx = canvas.getContext('2d')!;
-  ctx.scale(dpr, dpr);
+// Helper to calculate screen-space bounding box of a wall based on facing direction
+function calculateWallBounds(
+  camera: THREE.Camera,
+  canvasWidth: number,
+  canvasHeight: number,
+  wallDistance: number,
+  wallHeight: number,
+  facing: 'front' | 'left' | 'right'
+): { minX: number; maxX: number; minY: number; maxY: number } | null {
+  if (!(camera as THREE.PerspectiveCamera).isPerspectiveCamera) return null;
 
-  // Base wall color - beige/tan bathroom partition
-  const gradient = ctx.createLinearGradient(0, 0, width, height);
-  gradient.addColorStop(0, '#e8dfd0');
-  gradient.addColorStop(0.5, '#dfd6c7');
-  gradient.addColorStop(1, '#d8cfc0');
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, width, height);
+  const perspectiveCamera = camera as THREE.PerspectiveCamera;
 
-  // Add shadow at bottom of wall to suggest elevation above floor
-  const shadowGradient = ctx.createLinearGradient(0, height - 30, 0, height);
-  shadowGradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
-  shadowGradient.addColorStop(1, 'rgba(0, 0, 0, 0.15)');
-  ctx.fillStyle = shadowGradient;
-  ctx.fillRect(0, height - 30, width, 30);
+  // Wall geometry matches StallGeometry component
+  const stallWidth = wallDistance * 2;
+  const floorGap = 0.09;
+  const adjustedWallHeight = wallHeight - floorGap;
+  const wallCenterY = floorGap / 2;
+  const stallDepth = 2.4;
+  const backZ = 1.8;
+  const frontZ = backZ - stallDepth;
 
-  // Subtle wear texture
-  ctx.globalAlpha = 0.03;
-  for (let i = 0; i < width; i += 4) {
-    ctx.fillStyle = '#000';
-    ctx.fillRect(i, 0, 1, height);
-  }
-  for (let i = 0; i < height; i += 6) {
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, i, width, 1);
-  }
-  ctx.globalAlpha = 1;
+  let wallCorners: THREE.Vector3[];
 
-  // Draw lock on front wall
-  if (showLock) {
-    const lockX = width - 80;
-    const lockY = height * 0.55;
-
-    // Lock housing
-    ctx.fillStyle = '#c0c0c0';
-    ctx.fillRect(lockX, lockY - 16, 65, 32);
-    ctx.strokeStyle = '#888';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(lockX, lockY - 16, 65, 32);
-
-    // Occupied indicator (red circle)
-    ctx.beginPath();
-    ctx.arc(lockX + 18, lockY, 10, 0, Math.PI * 2);
-    ctx.fillStyle = '#c0392b';
-    ctx.fill();
-    ctx.strokeStyle = '#666';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // Bolt mechanism
-    ctx.fillStyle = '#808080';
-    ctx.fillRect(lockX + 40, lockY - 5, 20, 10);
+  if (facing === 'front') {
+    // Front wall (door) - vertical plane at frontZ
+    wallCorners = [
+      new THREE.Vector3(-stallWidth / 2, wallCenterY - adjustedWallHeight / 2, frontZ), // bottom-left
+      new THREE.Vector3(stallWidth / 2, wallCenterY - adjustedWallHeight / 2, frontZ),  // bottom-right
+      new THREE.Vector3(-stallWidth / 2, wallCenterY + adjustedWallHeight / 2, frontZ), // top-left
+      new THREE.Vector3(stallWidth / 2, wallCenterY + adjustedWallHeight / 2, frontZ),  // top-right
+    ];
+  } else if (facing === 'left') {
+    // Left wall - vertical plane at x = -wallDistance, extends in Z
+    wallCorners = [
+      new THREE.Vector3(-wallDistance, wallCenterY - adjustedWallHeight / 2, backZ),  // bottom-back
+      new THREE.Vector3(-wallDistance, wallCenterY - adjustedWallHeight / 2, frontZ), // bottom-front
+      new THREE.Vector3(-wallDistance, wallCenterY + adjustedWallHeight / 2, backZ),  // top-back
+      new THREE.Vector3(-wallDistance, wallCenterY + adjustedWallHeight / 2, frontZ), // top-front
+    ];
+  } else { // facing === 'right'
+    // Right wall - vertical plane at x = wallDistance, extends in Z
+    wallCorners = [
+      new THREE.Vector3(wallDistance, wallCenterY - adjustedWallHeight / 2, frontZ), // bottom-front
+      new THREE.Vector3(wallDistance, wallCenterY - adjustedWallHeight / 2, backZ),  // bottom-back
+      new THREE.Vector3(wallDistance, wallCenterY + adjustedWallHeight / 2, frontZ), // top-front
+      new THREE.Vector3(wallDistance, wallCenterY + adjustedWallHeight / 2, backZ),  // top-back
+    ];
   }
 
-  // Calculate opacity for each graffiti and render
-  const graffitiWithOpacity = graffiti.map(g => ({
-    ...g,
-    opacity: calculateOpacity(g.createdAt, g.expiresAt, g.implement)
-  }));
+  // Project to screen space (-1 to 1 in NDC)
+  const screenCorners = wallCorners.map(corner => {
+    const projected = corner.clone().project(perspectiveCamera);
+    return {
+      x: (projected.x + 1) * 0.5 * canvasWidth,
+      y: (1 - (projected.y + 1) * 0.5) * canvasHeight, // Flip Y for screen coords
+    };
+  });
 
-  renderGraffitiStrokes(ctx, graffitiWithOpacity, width, height);
+  // Find bounding box
+  const xs = screenCorners.map(c => c.x);
+  const ys = screenCorners.map(c => c.y);
 
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.needsUpdate = true;
-  return texture;
-}
-
-// Create floor texture
-function createFloorTexture(size: number): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas');
-  const dpr = 2;
-  canvas.width = size * dpr;
-  canvas.height = size * dpr;
-
-  const ctx = canvas.getContext('2d')!;
-  ctx.scale(dpr, dpr);
-
-  // Checkerboard pattern
-  const tileSize = 30;
-  for (let y = 0; y < size; y += tileSize) {
-    for (let x = 0; x < size; x += tileSize) {
-      const isLight = ((x / tileSize) + (y / tileSize)) % 2 === 0;
-      ctx.fillStyle = isLight ? '#e8e0d0' : '#c8bfb0';
-      ctx.fillRect(x, y, tileSize, tileSize);
-    }
-  }
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.needsUpdate = true;
-  return texture;
-}
-
-// Create ceiling texture
-function createCeilingTexture(size: number): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas');
-  canvas.width = size * 2;
-  canvas.height = size * 2;
-
-  const ctx = canvas.getContext('2d')!;
-
-  // Grey ceiling
-  const gradient = ctx.createLinearGradient(0, 0, 0, size * 2);
-  gradient.addColorStop(0, '#b0b0b0');
-  gradient.addColorStop(1, '#a0a0a0');
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, size * 2, size * 2);
-
-  // Fluorescent light fixture
-  const lightX = size - 50;
-  const lightY = size - 10;
-  ctx.fillStyle = '#e0e0e0';
-  ctx.fillRect(lightX, lightY, 100, 20);
-  ctx.strokeStyle = '#d0d0d0';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(lightX, lightY, 100, 20);
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.needsUpdate = true;
-  return texture;
+  return {
+    minX: Math.min(...xs),
+    maxX: Math.max(...xs),
+    minY: Math.min(...ys),
+    maxY: Math.max(...ys),
+  };
 }
 
 // Camera controller component
@@ -162,13 +103,15 @@ function CameraController({
   isTransitioning,
   setIsTransitioning,
   cameraY,
-  fov
+  fov,
+  onCameraReady,
 }: {
   targetRotation: number;
   isTransitioning: boolean;
   setIsTransitioning: (v: boolean) => void;
   cameraY: number;
   fov: number;
+  onCameraReady?: (camera: THREE.Camera) => void;
 }) {
   const { camera } = useThree();
   const currentRotation = useRef(targetRotation);
@@ -177,13 +120,15 @@ function CameraController({
   // Initialize camera on mount
   useEffect(() => {
     if (!initialized.current) {
-      camera.position.set(0, cameraY, 0);
+      // Position camera back in the stall (positive Z) looking forward
+      camera.position.set(0, cameraY, 1.2);
       camera.rotation.set(0, 0, 0); // Reset rotation
-      camera.lookAt(0, cameraY, -1); // Look forward (negative Z)
+      camera.lookAt(0, cameraY, -1); // Look forward toward door (negative Z)
       currentRotation.current = targetRotation;
       initialized.current = true;
+      onCameraReady?.(camera);
     }
-  }, [camera, targetRotation, cameraY]);
+  }, [camera, targetRotation, cameraY, onCameraReady]);
 
   // Update camera Y position when it changes
   useEffect(() => {
@@ -209,7 +154,7 @@ function CameraController({
         adjustedDiff = diff > 0 ? diff - Math.PI * 2 : diff + Math.PI * 2;
       }
 
-      const speed = 8;
+      const speed = 5.3; // Slowed down from 8 (1.5x slower)
       currentRotation.current += adjustedDiff * delta * speed;
 
       // Snap to target when close enough
@@ -229,30 +174,56 @@ function CameraController({
 // The actual 3D stall geometry
 function StallGeometry({
   graffiti,
-  wallDistance = 1.5,
+  wallDistance = 0.5,
   wallHeight = 2.0,
+  canvasWidth = 480,
+  canvasHeight = 736,
 }: {
   graffiti: Record<WallType, Graffiti[]>;
   wallDistance?: number;
   wallHeight?: number;
+  canvasWidth?: number;
+  canvasHeight?: number;
 }) {
-  // Create textures with memoization
-  const frontTexture = useMemo(
-    () => createWallTexture(graffiti.front, 512, 512, true),
+  // Create stable keys for memoization based on graffiti content
+  const frontKey = useMemo(
+    () => graffiti.front.map(g => `${g.id}-${g.opacity}`).join(','),
     [graffiti.front]
   );
-  const leftTexture = useMemo(
-    () => createWallTexture(graffiti.left, 512, 512, false),
+  const leftKey = useMemo(
+    () => graffiti.left.map(g => `${g.id}-${g.opacity}`).join(','),
     [graffiti.left]
+  );
+  const rightKey = useMemo(
+    () => graffiti.right.map(g => `${g.id}-${g.opacity}`).join(','),
+    [graffiti.right]
+  );
+
+  // Create textures - use canvas dimensions for perfect aspect ratio match
+  const frontTexture = useMemo(() => {
+    return createDoorTexture(graffiti.front, canvasWidth, canvasHeight);
+  }, [frontKey, canvasWidth, canvasHeight, graffiti.front]);
+  const leftTexture = useMemo(
+    () => createWallTexture(graffiti.left, 512, 512, true),
+    [leftKey, graffiti.left]
   );
   const rightTexture = useMemo(
     () => createWallTexture(graffiti.right, 512, 512, false),
-    [graffiti.right]
+    [rightKey, graffiti.right]
   );
   const floorTexture = useMemo(() => createFloorTexture(512), []);
   const ceilingTexture = useMemo(() => createCeilingTexture(512), []);
 
-  const wallWidth = wallDistance * 2;
+  // Stall geometry: camera is at (0, cameraY, 1.2)
+  // Side walls extend from back of stall to front where door is
+  const stallDepth = 2.4; // Total depth from back to front
+  const backZ = 1.8; // Back wall position (behind camera)
+  const frontZ = backZ - stallDepth; // Front wall/door position
+  const stallWidth = wallDistance * 2;
+
+  // Extended dimensions to fill viewport without black gaps
+  const extendedFloorWidth = stallWidth * 3; // Much wider floor
+  const extendedFloorDepth = stallDepth * 2; // Much deeper floor
 
   // American-style stall partition: walls don't touch the floor
   const floorGap = 0.09; // ~9cm gap between wall bottom and floor
@@ -262,40 +233,54 @@ function StallGeometry({
 
   return (
     <group>
-      {/* Front wall - facing the viewer (at -Z) */}
-      <mesh position={[0, wallCenterY, -wallDistance]} rotation={[0, 0, 0]}>
-        <planeGeometry args={[wallWidth, adjustedWallHeight]} />
-        <meshLambertMaterial map={frontTexture} side={THREE.FrontSide} />
+      {/* Front wall (door) - at the FRONT edge of the side walls */}
+      <mesh position={[0, wallCenterY, frontZ]} rotation={[0, 0, 0]}>
+        <planeGeometry args={[stallWidth, adjustedWallHeight]} />
+        <meshLambertMaterial
+          map={frontTexture}
+          side={THREE.FrontSide}
+        />
       </mesh>
 
-      {/* Left wall - at -X, rotated to face inward */}
-      <mesh position={[-wallDistance, wallCenterY, 0]} rotation={[0, Math.PI / 2, 0]}>
-        <planeGeometry args={[wallWidth, adjustedWallHeight]} />
+      {/* Left wall - extends from back to front (where door is) */}
+      <mesh position={[-wallDistance, wallCenterY, (backZ + frontZ) / 2]} rotation={[0, Math.PI / 2, 0]}>
+        <planeGeometry args={[stallDepth, adjustedWallHeight]} />
         <meshLambertMaterial map={leftTexture} side={THREE.FrontSide} />
       </mesh>
 
-      {/* Right wall - at +X, rotated to face inward */}
-      <mesh position={[wallDistance, wallCenterY, 0]} rotation={[0, -Math.PI / 2, 0]}>
-        <planeGeometry args={[wallWidth, adjustedWallHeight]} />
+      {/* Right wall - extends from back to front (where door is) */}
+      <mesh position={[wallDistance, wallCenterY, (backZ + frontZ) / 2]} rotation={[0, -Math.PI / 2, 0]}>
+        <planeGeometry args={[stallDepth, adjustedWallHeight]} />
         <meshLambertMaterial map={rightTexture} side={THREE.FrontSide} />
       </mesh>
 
-      {/* Floor - at -Y, rotated to face upward */}
-      <mesh position={[0, -wallHeight / 2, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[wallWidth, wallWidth]} />
+      {/* Back wall behind camera - light beige to blend with bathroom */}
+      <mesh position={[0, wallCenterY, backZ + 0.5]} rotation={[0, Math.PI, 0]}>
+        <planeGeometry args={[extendedFloorWidth, adjustedWallHeight]} />
+        <meshLambertMaterial color="#e8dfd0" side={THREE.FrontSide} />
+      </mesh>
+
+      {/* Extended floor - covers entire visible area */}
+      <mesh position={[0, -wallHeight / 2, (backZ + frontZ) / 2]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[extendedFloorWidth, extendedFloorDepth]} />
         <meshLambertMaterial map={floorTexture} side={THREE.FrontSide} />
       </mesh>
 
-      {/* Ceiling - at +Y, rotated to face downward */}
-      <mesh position={[0, wallHeight / 2, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[wallWidth, wallWidth]} />
+      {/* Extended ceiling - covers entire visible area */}
+      <mesh position={[0, wallHeight / 2, (backZ + frontZ) / 2]} rotation={[Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[extendedFloorWidth, extendedFloorDepth]} />
         <meshLambertMaterial map={ceilingTexture} side={THREE.FrontSide} />
       </mesh>
     </group>
   );
 }
 
-export function StallView3D({ onSubmit, stallRef }: StallView3DProps) {
+export function StallView3D({
+  onSubmit,
+  stallRef,
+  debugUnlimitedPosting = false,
+  onDebugUnlimitedPostingChange
+}: StallView3DProps) {
   const [facing, setFacing] = useState<FacingDirection>('front');
   const [graffiti, setGraffiti] = useState<Record<WallType, Graffiti[]>>({
     front: [],
@@ -312,13 +297,18 @@ export function StallView3D({ onSubmit, stallRef }: StallView3DProps) {
   const [currentStroke, setCurrentStroke] = useState<StrokePoint[]>([]);
   const [isDrawing, setIsDrawing] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const lastPointRef = useRef<{ x: number; y: number; time: number } | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const lastPointRef = useRef<TimedPoint | null>(null);
+  const cameraRef = useRef<THREE.Camera | null>(null);
+
+  // Track canvas dimensions for texture generation
+  const [canvasDimensions, setCanvasDimensions] = useState({ width: 480, height: 736 });
 
   // Debug controls
   const [showDebug, setShowDebug] = useState(false);
-  const [fov, setFov] = useState(75);
-  const [cameraY, setCameraY] = useState(0);
-  const [wallDistance, setWallDistance] = useState(1.5);
+  const [fov, setFov] = useState(72); // Field of view from user's preferred settings
+  const [cameraY, setCameraY] = useState(0.25); // Eye height from user's preferred settings
+  const [wallDistance, setWallDistance] = useState(0.5); // Wall distance from user's preferred settings
   const [wallHeight, setWallHeight] = useState(2.0);
 
   // Expose graffiti getter via ref so parent can access current wall graffiti
@@ -352,6 +342,33 @@ export function StallView3D({ onSubmit, stallRef }: StallView3DProps) {
     } catch (error) {
       console.error('Failed to fetch graffiti:', error);
       setIsLoading(false);
+    }
+  }, []);
+
+  // Clear all graffiti from database
+  const clearAllGraffiti = useCallback(async () => {
+    if (!confirm('Clear all graffiti from all walls? This cannot be undone.')) {
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/graffiti/clear', {
+        method: 'POST',
+      });
+
+      if (response.ok) {
+        // Clear local state
+        setGraffiti({
+          front: [],
+          left: [],
+          right: [],
+        });
+        console.log('All graffiti cleared');
+      } else {
+        console.error('Failed to clear graffiti');
+      }
+    } catch (error) {
+      console.error('Error clearing graffiti:', error);
     }
   }, []);
 
@@ -429,6 +446,12 @@ export function StallView3D({ onSubmit, stallRef }: StallView3DProps) {
       if (ctx) {
         ctx.scale(dpr, dpr);
       }
+
+      // Update dimensions for texture generation
+      setCanvasDimensions({
+        width: canvas.clientWidth,
+        height: canvas.clientHeight
+      });
     };
 
     resizeCanvas();
@@ -436,15 +459,27 @@ export function StallView3D({ onSubmit, stallRef }: StallView3DProps) {
     return () => window.removeEventListener('resize', resizeCanvas);
   }, []);
 
+  // Clear preview strokes when graffiti is added to 3D texture
+  useEffect(() => {
+    // When graffiti updates for the current wall, clear any preview strokes
+    if (strokes.length > 0 && graffiti[facing].length > 0) {
+      setStrokes([]);
+    }
+  }, [graffiti, facing, strokes.length]);
+
   // Redraw canvas when strokes change
   useEffect(() => {
     const canvas = canvasRef.current;
+    const camera = cameraRef.current;
     if (!canvas) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+    // Clear using client dimensions (CSS dimensions) since context is scaled by DPR
+    const width = canvas.clientWidth;
+    const height = canvas.clientHeight;
+    ctx.clearRect(0, 0, width, height);
 
     // Render current drawing strokes
     const allStrokes = [...strokes, currentStroke].filter(s => s.length >= 2);
@@ -459,20 +494,67 @@ export function StallView3D({ onSubmit, stallRef }: StallView3DProps) {
       opacity: 1,
     }));
 
-    renderGraffitiStrokes(ctx, graffitiToRender, canvas.clientWidth, canvas.clientHeight);
-  }, [strokes, currentStroke, implement, facing]);
+    // For all walls, render within wall bounds to match 3D texture
+    if (camera) {
+      const wallBounds = calculateWallBounds(camera, width, height, wallDistance, wallHeight, facing);
+
+      if (wallBounds) {
+        // Save context state
+        ctx.save();
+
+        // Translate to wall bounds and scale to wall size
+        ctx.translate(wallBounds.minX, wallBounds.minY);
+        const wallWidth = wallBounds.maxX - wallBounds.minX;
+        const wallHeightPx = wallBounds.maxY - wallBounds.minY;
+
+        // Render strokes normalized to wall size (0-1 becomes wall dimensions)
+        renderGraffitiStrokes(ctx, graffitiToRender, wallWidth, wallHeightPx);
+
+        ctx.restore();
+        return;
+      }
+    }
+
+    // Fallback: render using full viewport dimensions
+    renderGraffitiStrokes(ctx, graffitiToRender, width, height);
+  }, [strokes, currentStroke, implement, facing, wallDistance, wallHeight]);
 
   // Drawing handlers
   const getPointFromEvent = useCallback((clientX: number, clientY: number): StrokePoint | null => {
     const canvas = canvasRef.current;
-    if (!canvas) return null;
+    const camera = cameraRef.current;
+    if (!canvas || !camera) return null;
 
     const rect = canvas.getBoundingClientRect();
-    return {
-      x: (clientX - rect.left) / rect.width,
-      y: (clientY - rect.top) / rect.height,
-    };
-  }, []);
+
+    // Calculate wall bounds for current facing direction
+    const wallBounds = calculateWallBounds(
+      camera,
+      rect.width,
+      rect.height,
+      wallDistance,
+      wallHeight,
+      facing
+    );
+
+    if (wallBounds) {
+      // Convert client coordinates to canvas-relative coordinates
+      const canvasX = clientX - rect.left;
+      const canvasY = clientY - rect.top;
+
+      // Normalize relative to wall bounds (0-1 within wall area)
+      const x = (canvasX - wallBounds.minX) / (wallBounds.maxX - wallBounds.minX);
+      const y = (canvasY - wallBounds.minY) / (wallBounds.maxY - wallBounds.minY);
+
+      return { x, y };
+    }
+
+    // Fallback if calculation fails: normalize to full viewport
+    const x = (clientX - rect.left) / rect.width;
+    const y = (clientY - rect.top) / rect.height;
+
+    return { x, y };
+  }, [facing, wallDistance, wallHeight]);
 
   const handleDrawStart = useCallback((clientX: number, clientY: number) => {
     const point = getPointFromEvent(clientX, clientY);
@@ -480,7 +562,7 @@ export function StallView3D({ onSubmit, stallRef }: StallView3DProps) {
 
     setIsDrawing(true);
     setCurrentStroke([point]);
-    lastPointRef.current = { x: point.x, y: point.y, time: Date.now() };
+    lastPointRef.current = createTimedPoint(point);
   }, [getPointFromEvent]);
 
   const handleDrawMove = useCallback((clientX: number, clientY: number) => {
@@ -493,26 +575,17 @@ export function StallView3D({ onSubmit, stallRef }: StallView3DProps) {
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    const now = Date.now();
 
     // For carved mode, check velocity
     if (implement === 'carved' && lastPointRef.current) {
-      const dx = (point.x - lastPointRef.current.x) * rect.width;
-      const dy = (point.y - lastPointRef.current.y) * rect.height;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      const timeDelta = now - lastPointRef.current.time;
-
-      if (timeDelta > 0) {
-        const velocity = distance / timeDelta;
-        if (velocity > CARVE_VELOCITY_THRESHOLD) {
-          lastPointRef.current = { x: point.x, y: point.y, time: now };
-          return;
-        }
+      if (!shouldAcceptPoint(lastPointRef.current, point, rect.width, rect.height)) {
+        lastPointRef.current = createTimedPoint(point);
+        return;
       }
     }
 
     setCurrentStroke((prev) => [...prev, point]);
-    lastPointRef.current = { x: point.x, y: point.y, time: now };
+    lastPointRef.current = createTimedPoint(point);
   }, [isDrawing, implement, getPointFromEvent]);
 
   const handleDrawEnd = useCallback(() => {
@@ -520,14 +593,33 @@ export function StallView3D({ onSubmit, stallRef }: StallView3DProps) {
 
     setIsDrawing(false);
     if (currentStroke.length >= 2) {
+      // Don't transform - save raw screen coordinates
       const newStrokes = [...strokes, currentStroke];
-      setStrokes(newStrokes);
 
-      // Auto-submit the drawing
+      // DEBUG: Log coordinates being submitted
+      if (cameraRef.current && canvasRef.current) {
+        const canvas = canvasRef.current;
+        const wallBounds = calculateWallBounds(
+          cameraRef.current,
+          canvas.clientWidth,
+          canvas.clientHeight,
+          wallDistance,
+          wallHeight,
+          facing
+        );
+        console.log('=== DRAW END ===');
+        console.log('Wall:', facing);
+        console.log('Canvas dimensions:', canvas.clientWidth, 'x', canvas.clientHeight);
+        console.log('Wall bounds (pixels):', wallBounds);
+        console.log('First stroke point (0-1 within wall):', currentStroke[0]);
+        console.log('Last stroke point (0-1 within wall):', currentStroke[currentStroke.length - 1]);
+      }
+
+      // Auto-submit with raw coordinates (no transformation)
       onSubmit(facing, newStrokes, implement);
 
-      // Clear strokes after submission
-      setStrokes([]);
+      // Don't clear strokes yet - wait for addLocalGraffiti to add to 3D texture
+      // This prevents the flicker where preview disappears before 3D texture updates
     }
     setCurrentStroke([]);
     lastPointRef.current = null;
@@ -540,12 +632,6 @@ export function StallView3D({ onSubmit, stallRef }: StallView3DProps) {
 
     // Start drawing immediately
     handleDrawStart(touch.clientX, touch.clientY);
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    e.preventDefault();
-    const touch = e.touches[0];
-    handleDrawMove(touch.clientX, touch.clientY);
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
@@ -578,10 +664,26 @@ export function StallView3D({ onSubmit, stallRef }: StallView3DProps) {
     handleDrawEnd();
   };
 
+  // Touch event listeners with non-passive option to allow preventDefault
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleTouchMoveNonPassive = (e: TouchEvent) => {
+      e.preventDefault();
+      const touch = e.touches[0];
+      handleDrawMove(touch.clientX, touch.clientY);
+    };
+
+    container.addEventListener('touchmove', handleTouchMoveNonPassive, { passive: false });
+    return () => container.removeEventListener('touchmove', handleTouchMoveNonPassive);
+  }, [handleDrawMove]);
+
   const targetRotation = FACING_TO_ROTATION[facing];
 
   return (
     <div
+      ref={containerRef}
       className="relative w-full h-full bg-black"
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
@@ -601,6 +703,7 @@ export function StallView3D({ onSubmit, stallRef }: StallView3DProps) {
           setIsTransitioning={setIsTransitioning}
           cameraY={cameraY}
           fov={fov}
+          onCameraReady={(camera) => { cameraRef.current = camera; }}
         />
 
         {/* Ambient lighting - brighten to see floor gap clearly */}
@@ -616,6 +719,8 @@ export function StallView3D({ onSubmit, stallRef }: StallView3DProps) {
           graffiti={graffiti}
           wallDistance={wallDistance}
           wallHeight={wallHeight}
+          canvasWidth={canvasDimensions.width}
+          canvasHeight={canvasDimensions.height}
         />
       </Canvas>
 
@@ -631,9 +736,6 @@ export function StallView3D({ onSubmit, stallRef }: StallView3DProps) {
       {/* UI Overlay */}
       <div
         className="absolute inset-0 pointer-events-none flex flex-col"
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
       >
         {/* Drawing canvas overlay - positioned above 3D canvas */}
         <canvas
@@ -678,9 +780,9 @@ export function StallView3D({ onSubmit, stallRef }: StallView3DProps) {
         </div>
       </div>
 
-      {/* Debug panel */}
+      {/* Debug panel - positioned outside the main view to the right */}
       {showDebug && (
-        <div className="absolute top-4 right-4 bg-black/90 text-white p-4 rounded text-xs font-mono z-50 w-64 select-text">
+        <div className="fixed top-4 right-4 bg-black/90 text-white p-4 rounded text-xs font-mono z-50 w-72 select-text border border-white/20 shadow-2xl">
           <div className="mb-3 text-sm font-bold border-b border-white/20 pb-2">
             Debug Controls (press ` to hide)
           </div>
@@ -761,6 +863,29 @@ export function StallView3D({ onSubmit, stallRef }: StallView3DProps) {
               Facing: {facing}<br/>
               Camera at (0, {cameraY.toFixed(2)}, 0)<br/>
               Front wall at Z=-{wallDistance.toFixed(1)}
+            </div>
+
+            {/* Debug options */}
+            <div className="pt-3 border-t border-white/20 space-y-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={debugUnlimitedPosting}
+                  onChange={(e) => onDebugUnlimitedPostingChange?.(e.target.checked)}
+                  className="w-4 h-4"
+                />
+                <span className="text-white/70 text-xs">Unlimited posting (bypass session limit)</span>
+              </label>
+            </div>
+
+            {/* Clear all graffiti button */}
+            <div className="pt-3 border-t border-white/20">
+              <button
+                onClick={clearAllGraffiti}
+                className="w-full bg-red-600/80 hover:bg-red-600 text-white px-3 py-2 rounded text-xs font-semibold transition-colors"
+              >
+                Clear All Graffiti
+              </button>
             </div>
           </div>
         </div>

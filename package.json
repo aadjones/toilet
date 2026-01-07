@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
     "kill": "lsof -ti:3000 | xargs kill -9 2>/dev/null; rm -rf .next/dev/lock 2>/dev/null; echo 'Cleaned up'",
     "clean": "rm -rf .next .turbo node_modules/.cache && echo 'Cache cleaned'"
   },
@@ -27,9 +29,11 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/uuid": "^10.0.0",
+    "@vitest/ui": "^4.0.16",
     "eslint": "^9",
     "eslint-config-next": "16.1.1",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.0.16"
   }
 }

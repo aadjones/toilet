@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getGraffitiForWall, createGraffiti } from '@/lib/db';
 import { IMPLEMENT_STYLES, type WallType, type ImplementType, type Stroke } from '@/lib/config';
 import { checkRateLimit } from '@/lib/rate-limit';
+import { FEATURE_FLAGS } from '@/lib/feature-flags';
 
 // GET /api/graffiti?wall=front
 export async function GET(request: NextRequest) {
@@ -28,24 +29,26 @@ export async function GET(request: NextRequest) {
 
 // POST /api/graffiti
 export async function POST(request: NextRequest) {
-  // Rate limit by IP address: 5 posts per hour
-  const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-    || request.headers.get('x-real-ip')
-    || 'unknown';
+  // Rate limit by IP address: 5 posts per hour (if enabled)
+  if (FEATURE_FLAGS.ENABLE_RATE_LIMITING) {
+    const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+      || request.headers.get('x-real-ip')
+      || 'unknown';
 
-  const rateLimit = checkRateLimit(ip, 5, 60 * 60 * 1000);
+    const rateLimit = checkRateLimit(ip, 5, 60 * 60 * 1000);
 
-  if (!rateLimit.allowed) {
-    return NextResponse.json(
-      { error: 'Too many requests. Please try again later.' },
-      {
-        status: 429,
-        headers: {
-          'X-RateLimit-Remaining': '0',
-          'X-RateLimit-Reset': String(rateLimit.resetAt),
-        },
-      }
-    );
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please try again later.' },
+        {
+          status: 429,
+          headers: {
+            'X-RateLimit-Remaining': '0',
+            'X-RateLimit-Reset': String(rateLimit.resetAt),
+          },
+        }
+      );
+    }
   }
 
   try {
