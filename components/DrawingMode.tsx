@@ -68,8 +68,8 @@ export function DrawingMode({ wall, existingGraffiti, onSubmit, onCancel }: Draw
     // First render existing graffiti
     renderGraffitiStrokes(ctx, existingGraffiti, rect.width, rect.height);
 
-    // Then render new strokes on top
-    const allStrokes = [...strokes, currentStroke].filter(s => s.length >= 2);
+    // Then render new strokes on top (including single-point taps)
+    const allStrokes = [...strokes, currentStroke].filter(s => s.length >= 1);
     const newGraffitiToRender: Graffiti[] = allStrokes.map((stroke, i) => ({
       id: `temp-${i}`,
       wall,
@@ -158,7 +158,8 @@ export function DrawingMode({ wall, existingGraffiti, onSubmit, onCancel }: Draw
     if (!isDrawing) return;
 
     setIsDrawing(false);
-    if (currentStroke.length >= 2) {
+    // Allow single-point strokes (taps) - they'll be rendered as dots
+    if (currentStroke.length >= 1) {
       setStrokes((prev) => [...prev, currentStroke]);
       // Lock implement after first stroke
       if (!isImplementLocked) {
@@ -220,7 +221,8 @@ export function DrawingMode({ wall, existingGraffiti, onSubmit, onCancel }: Draw
     if (!isDrawing) return;
 
     setIsDrawing(false);
-    if (currentStroke.length >= 2) {
+    // Allow single-point strokes (clicks) - they'll be rendered as dots
+    if (currentStroke.length >= 1) {
       setStrokes((prev) => [...prev, currentStroke]);
       // Lock implement after first stroke
       if (!isImplementLocked) {

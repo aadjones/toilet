@@ -659,8 +659,8 @@ export function StallView3D({
     const height = canvas.clientHeight;
     ctx.clearRect(0, 0, width, height);
 
-    // Render current drawing strokes
-    const allStrokes = [...strokes, currentStroke].filter((s) => s.length >= 2);
+    // Render current drawing strokes (including single-point taps)
+    const allStrokes = [...strokes, currentStroke].filter((s) => s.length >= 1);
     const graffitiToRender: Graffiti[] = allStrokes.map((stroke, i) => ({
       id: `temp-${i}`,
       wall: facing,
@@ -823,7 +823,8 @@ export function StallView3D({
     if (!isDrawing) return;
 
     setIsDrawing(false);
-    if (currentStroke.length >= 2) {
+    // Allow single-point strokes (taps) - they'll be rendered as dots
+    if (currentStroke.length >= 1) {
       // Don't transform - save raw screen coordinates
       const newStrokes = [...strokes, currentStroke];
 
@@ -847,11 +848,14 @@ export function StallView3D({
           canvas.clientHeight
         );
         console.log("Wall bounds (pixels):", wallBounds);
+        console.log("Stroke points:", currentStroke.length);
         console.log("First stroke point (0-1 within wall):", currentStroke[0]);
-        console.log(
-          "Last stroke point (0-1 within wall):",
-          currentStroke[currentStroke.length - 1]
-        );
+        if (currentStroke.length > 1) {
+          console.log(
+            "Last stroke point (0-1 within wall):",
+            currentStroke[currentStroke.length - 1]
+          );
+        }
       }
 
       // Auto-submit with raw coordinates (no transformation)
@@ -862,7 +866,7 @@ export function StallView3D({
     }
     setCurrentStroke([]);
     lastPointRef.current = null;
-  }, [isDrawing, currentStroke, strokes, facing, implement, onSubmit]);
+  }, [isDrawing, currentStroke, strokes, facing, implement, onSubmit, wallDistance, wallHeight]);
 
   // Touch/swipe handlers - need to distinguish between swipe and draw
   const handleTouchStart = (e: React.TouchEvent) => {

@@ -8,6 +8,15 @@ import { type Graffiti } from './config';
 import { renderGraffitiStrokes, calculateOpacity } from './wall-rendering';
 
 /**
+ * Seeded random number generator for consistent texture details.
+ * Returns a value between 0 and 1.
+ */
+function seededRandom(seed: number): number {
+  const x = Math.sin(seed) * 10000;
+  return x - Math.floor(x);
+}
+
+/**
  * Creates a texture for side partition walls (left/right walls).
  * Includes partition material, seams, mounting brackets, and optional toilet paper dispenser.
  *
@@ -39,13 +48,13 @@ export function createWallTexture(
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, width, height);
 
-  // Mottled/speckled texture (powder-coat appearance)
+  // Mottled/speckled texture (powder-coat appearance) - use seeded random for consistency
   ctx.globalAlpha = 0.15;
   for (let i = 0; i < 800; i++) {
-    const x = Math.random() * width;
-    const y = Math.random() * height;
-    const size = Math.random() * 2 + 0.5;
-    const isDark = Math.random() > 0.5;
+    const x = seededRandom(i * 4 + 1) * width;
+    const y = seededRandom(i * 4 + 2) * height;
+    const size = seededRandom(i * 4 + 3) * 2 + 0.5;
+    const isDark = seededRandom(i * 4 + 4) > 0.5;
     ctx.fillStyle = isDark ? '#b8b2a4' : '#e0dbd0';
     ctx.beginPath();
     ctx.arc(x, y, size, 0, Math.PI * 2);
@@ -129,13 +138,13 @@ export function createWallTexture(
   ctx.fillStyle = shadowGradient;
   ctx.fillRect(0, height - 40, width, 40);
 
-  // Scuff marks near bottom
+  // Scuff marks near bottom (use seeded random for consistency)
   ctx.globalAlpha = 0.08;
   ctx.fillStyle = '#000';
   for (let i = 0; i < 15; i++) {
-    const x = Math.random() * width;
-    const y = height - Math.random() * 80;
-    const w = Math.random() * 25 + 8;
+    const x = seededRandom(i * 50 + 1) * width;
+    const y = height - seededRandom(i * 50 + 2) * 80;
+    const w = seededRandom(i * 50 + 3) * 25 + 8;
     ctx.fillRect(x, y, w, 1.5);
   }
   ctx.globalAlpha = 1;
@@ -358,13 +367,13 @@ export function createDoorTexture(
     ctx.fill();
   });
 
-  // Scuffs and wear marks at bottom
+  // Scuffs and wear marks at bottom (use seeded random for consistency)
   ctx.globalAlpha = 0.1;
   ctx.fillStyle = '#000';
   for (let i = 0; i < 20; i++) {
-    const x = Math.random() * width;
-    const y = height - Math.random() * 100;
-    const w = Math.random() * 30 + 10;
+    const x = seededRandom(i * 100 + 1) * width;
+    const y = height - seededRandom(i * 100 + 2) * 100;
+    const w = seededRandom(i * 100 + 3) * 30 + 10;
     ctx.fillRect(x, y, w, 2);
   }
   ctx.globalAlpha = 1;

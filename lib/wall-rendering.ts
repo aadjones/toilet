@@ -42,7 +42,25 @@ export function renderGraffitiStrokes(
     }
 
     g.strokeData.forEach((stroke, strokeIndex) => {
-      if (stroke.length < 2) return;
+      if (stroke.length < 1) return;
+
+      // Handle single-point strokes as filled dots (except for carved - can't tap-carve!)
+      if (stroke.length === 1) {
+        if (g.implement === 'carved') {
+          // Skip carved tap dots - you can't tap-carve into a hard surface
+          return;
+        }
+
+        const x = stroke[0].x * width;
+        const y = stroke[0].y * height;
+        const radius = style.lineWidth / 2;
+
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fillStyle = g.color;
+        ctx.fill();
+        return;
+      }
 
       // DEBUG: Only log for texture canvas, not preview
       if (graffitiIndex === graffiti.length - 1 && strokeIndex === 0 && width !== 480) {
