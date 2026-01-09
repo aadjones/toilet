@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { IMPLEMENT_STYLES, DECAY_DURATIONS } from '@/lib/config';
+import { IMPLEMENT_STYLES, DECAY_DURATIONS, type ImplementType } from '@/lib/config';
 
 interface AnalyticsStats {
   totalSessions: number;
