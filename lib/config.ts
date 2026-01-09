@@ -5,6 +5,7 @@ export const DECAY_DURATIONS = {
   scribble: parseInt(process.env.SCRIBBLE_DURATION_MS || String(4 * 60 * 60 * 1000)), // 4 hours
   marker: parseInt(process.env.MARKER_DURATION_MS || String(24 * 60 * 60 * 1000)), // 1 day
   carved: parseInt(process.env.CARVED_DURATION_MS || String(7 * 24 * 60 * 60 * 1000)), // 1 week
+  whiteout: parseInt(process.env.WHITEOUT_DURATION_MS || String(2 * 60 * 60 * 1000)), // 2 hours
 } as const;
 
 // Implement visual properties
@@ -33,6 +34,14 @@ export const IMPLEMENT_STYLES = {
     shadowBlur: 2,
     shadowColor: 'rgba(0,0,0,0.4)',
   },
+  whiteout: {
+    color: '#ffffff',
+    lineWidth: 12,
+    lineCap: 'round' as const,
+    lineJoin: 'round' as const,
+    shadowBlur: 0,
+    shadowColor: 'transparent',
+  },
 } as const;
 
 // Carved mode velocity threshold (pixels per millisecond)
@@ -47,7 +56,7 @@ export const POLL_INTERVAL_MS = 30 * 1000; // 30 seconds
 
 // Wall types
 export type WallType = 'front' | 'left' | 'right';
-export type ImplementType = 'scribble' | 'marker' | 'carved';
+export type ImplementType = 'scribble' | 'marker' | 'carved' | 'whiteout';
 
 // Stroke point
 export interface StrokePoint {

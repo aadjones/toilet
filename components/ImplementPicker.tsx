@@ -1,7 +1,7 @@
 'use client';
 
 import { type ImplementType } from '@/lib/config';
-import { ScribbleIcon, MarkerIcon, CarvedIcon } from './icons/ImplementIcons';
+import { ScribbleIcon, MarkerIcon, CarvedIcon, WhiteoutIcon } from './icons/ImplementIcons';
 
 interface ImplementPickerProps {
   selected: ImplementType;
@@ -14,9 +14,10 @@ const implementOptions: {
   label: string;
   icon: React.ReactNode;
 }[] = [
-  { type: 'scribble', label: 'Scribble', icon: <ScribbleIcon /> },
+  { type: 'scribble', label: 'Pencil', icon: <ScribbleIcon /> },
   { type: 'marker', label: 'Marker', icon: <MarkerIcon /> },
   { type: 'carved', label: 'Carved', icon: <CarvedIcon /> },
+  { type: 'whiteout', label: 'Whiteout', icon: <WhiteoutIcon /> },
 ];
 
 export function ImplementPicker({ selected, onChange, disabled = false }: ImplementPickerProps) {
@@ -27,9 +28,12 @@ export function ImplementPicker({ selected, onChange, disabled = false }: Implem
           key={type}
           onClick={() => !disabled && onChange(type)}
           disabled={disabled && selected !== type}
+          aria-label={`Select ${label} tool`}
+          aria-pressed={selected === type}
           className={`
             group relative flex flex-col items-center gap-2 px-4 py-3 rounded-lg min-h-[44px]
             transition-all duration-200
+            focus:outline-none focus:ring-2 focus:ring-[#d94f30] focus:ring-offset-2 focus:ring-offset-[#2b2d2f]
             ${selected === type
               ? 'bg-[#54585c] text-[#e8e4de] scale-105 shadow-lg'
               : disabled

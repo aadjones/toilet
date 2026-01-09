@@ -25,6 +25,7 @@ import {
   createTimedPoint,
   type TimedPoint,
 } from "@/lib/velocity-gating";
+import { trackEvent } from "@/lib/analytics";
 
 interface StallView3DProps {
   onSubmit: (
@@ -423,11 +424,19 @@ export function StallView3D({
     setHeaderMessage(
       HEADER_MESSAGES[Math.floor(Math.random() * HEADER_MESSAGES.length)]
     );
+    // Track session start
+    trackEvent('session_start');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Drawing state
   const [implement, setImplement] = useState<ImplementType>("scribble");
+
+  // Wrapper to track implement changes
+  const handleImplementChange = useCallback((newImplement: ImplementType) => {
+    setImplement(newImplement);
+    trackEvent('implement_selected', { implement: newImplement });
+  }, []);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [currentStroke, setCurrentStroke] = useState<StrokePoint[]>([]);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -575,18 +584,25 @@ export function StallView3D({
 
       setIsTransitioning(true);
       setFacing((prev) => {
+        let newFacing = prev;
         // Turn head right = see right wall
         if (direction === "right") {
-          if (prev === "front") return "right";
-          if (prev === "left") return "front";
-          if (prev === "right") return "left";
+          if (prev === "front") newFacing = "right";
+          else if (prev === "left") newFacing = "front";
+          else if (prev === "right") newFacing = "left";
         } else {
           // Turn head left = see left wall
-          if (prev === "front") return "left";
-          if (prev === "right") return "front";
-          if (prev === "left") return "right";
+          if (prev === "front") newFacing = "left";
+          else if (prev === "right") newFacing = "front";
+          else if (prev === "left") newFacing = "right";
         }
-        return prev;
+
+        // Track rotation
+        if (newFacing !== prev) {
+          trackEvent('wall_rotation', { from: prev, to: newFacing });
+        }
+
+        return newFacing;
       });
     },
     [isTransitioning]
@@ -782,8 +798,11 @@ export function StallView3D({
       setIsDrawing(true);
       setCurrentStroke([point]);
       lastPointRef.current = createTimedPoint(point);
+
+      // Track drawing started
+      trackEvent('drawing_started', { wall: facing, implement });
     },
-    [getPointFromEvent, selectorMode, graffiti, facing]
+    [getPointFromEvent, selectorMode, graffiti, facing, implement]
   );
 
   const handleDrawMove = useCallback(
@@ -857,6 +876,13 @@ export function StallView3D({
           );
         }
       }
+
+      // Track drawing submitted
+      trackEvent('drawing_submitted', {
+        wall: facing,
+        implement,
+        strokeCount: newStrokes.length,
+      });
 
       // Auto-submit with raw coordinates (no transformation)
       onSubmit(facing, newStrokes, implement);
@@ -987,8 +1013,12 @@ export function StallView3D({
       <div className="absolute inset-0 pointer-events-none flex flex-col">
         {/* Header message */}
         <div className="absolute top-6 left-1/2 -translate-x-1/2 pointer-events-none z-10">
-          <p className="text-[#a39e94] text-sm font-medium tracking-wide text-center px-4">
+          <p className="text-[#c4bfb3] text-sm font-medium tracking-wide text-center px-4">
             {headerMessage}
+            {(() => {
+              const totalCount = graffiti.front.length + graffiti.left.length + graffiti.right.length;
+              return totalCount > 0 ? ` (${totalCount} mark${totalCount === 1 ? '' : 's'})` : '';
+            })()}
           </p>
         </div>
 
@@ -1000,6 +1030,8 @@ export function StallView3D({
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
+          role="img"
+          aria-label={`Bathroom stall ${facing} wall - drawing canvas`}
         />
 
         {/* Navigation arrows - hide left arrow at left wall, hide right arrow at right wall */}
@@ -1051,7 +1083,7 @@ export function StallView3D({
 
         {/* Implement picker at bottom - always visible */}
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 pointer-events-auto">
-          <ImplementPicker selected={implement} onChange={setImplement} />
+          <ImplementPicker selected={implement} onChange={handleImplementChange} />
         </div>
       </div>
 

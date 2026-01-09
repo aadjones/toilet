@@ -68,9 +68,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate implement
-    if (!implement || !['scribble', 'marker', 'carved'].includes(implement)) {
+    if (!implement || !['scribble', 'marker', 'carved', 'whiteout'].includes(implement)) {
       return NextResponse.json(
-        { error: 'Invalid implement. Must be scribble, marker, or carved.' },
+        { error: 'Invalid implement. Must be scribble, marker, carved, or whiteout.' },
         { status: 400 }
       );
     }
