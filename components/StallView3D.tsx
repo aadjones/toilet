@@ -26,6 +26,7 @@ import {
   type TimedPoint,
 } from "@/lib/velocity-gating";
 import { trackEvent } from "@/lib/analytics";
+import { HEADER_MESSAGES } from "@/lib/header-messages";
 
 interface StallView3DProps {
   onSubmit: (
@@ -409,15 +410,7 @@ export function StallView3D({
   const touchStartX = useRef<number | null>(null);
 
   // Random message on mount (client-side only to avoid hydration mismatch)
-  const HEADER_MESSAGES = [
-    "You're here anyway. Might as well leave your mark",
-    "For a good time, draw here",
-    "Time for another shitpost",
-    "Express yourself (management hates it)",
-    "The stall provides; the stall taketh away",
-    "Everyone needs a wall",
-  ];
-  const [headerMessage, setHeaderMessage] = useState(HEADER_MESSAGES[0]);
+  const [headerMessage, setHeaderMessage] = useState<string>(HEADER_MESSAGES[0]);
 
   // Set random message on mount (client-side only)
   useEffect(() => {
@@ -1015,10 +1008,6 @@ export function StallView3D({
         <div className="absolute top-6 left-1/2 -translate-x-1/2 pointer-events-none z-10">
           <p className="text-[#c4bfb3] text-sm font-medium tracking-wide text-center px-4">
             {headerMessage}
-            {(() => {
-              const totalCount = graffiti.front.length + graffiti.left.length + graffiti.right.length;
-              return totalCount > 0 ? ` (${totalCount} mark${totalCount === 1 ? '' : 's'})` : '';
-            })()}
           </p>
         </div>
 

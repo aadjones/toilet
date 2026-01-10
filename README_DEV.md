@@ -18,7 +18,7 @@ Press the **backtick key (`)** to toggle the debug panel overlay. This panel pro
 **Location:** [components/DebugPanel.tsx](components/DebugPanel.tsx)
 
 ### Analytics Dashboard
-Visit `/admin` to access the password-protected analytics dashboard.
+Visit `/analytics` to access the password-protected analytics dashboard.
 
 **Features:**
 - Total sessions (unique visitors)
@@ -26,14 +26,13 @@ Visit `/admin` to access the password-protected analytics dashboard.
 - Implement usage statistics with decay times
 - Wall rotation heatmap (shows user navigation patterns)
 - Graffiti distribution by wall and implement
-- Activity timeline (last 7 days)
 
 **Authentication:**
 - Set admin password via `ADMIN_PASSWORD` environment variable
 - Default password: `admin123` (change this in production!)
 - Uses simple Bearer token authentication via Authorization header
 
-**Location:** [app/admin/page.tsx](app/admin/page.tsx)
+**Location:** [app/analytics/page.tsx](app/analytics/page.tsx)
 
 ## Database Setup
 
@@ -198,7 +197,7 @@ opacity = 1 - (elapsedTime / totalDecayDuration)
 - `GET /api/init` - Initialize database tables
 
 ### Protected Endpoints
-- `GET /api/admin/stats` - Get analytics statistics
+- `GET /api/analytics/stats` - Get analytics statistics
   - Requires: `Authorization: Bearer {ADMIN_PASSWORD}` header
 
 ## Environment Variables
@@ -228,7 +227,7 @@ POLL_INTERVAL_MS=30000       # 30 seconds
 2. Visit `http://localhost:3000`
 3. Press `` ` `` to open debug panel
 4. Test drawing on each wall
-5. Visit `/admin` to check analytics
+5. Visit `/analytics` to check analytics
 
 ### Resetting Test Data
 ```bash
@@ -291,11 +290,12 @@ DELETE FROM analytics_events;
 
 ```
 app/
-├── admin/page.tsx              # Analytics dashboard
+├── analytics/page.tsx          # Analytics dashboard
 ├── api/
 │   ├── graffiti/route.ts      # Graffiti CRUD
-│   ├── analytics/route.ts     # Event tracking
-│   ├── admin/stats/route.ts   # Analytics stats
+│   ├── analytics/
+│   │   ├── route.ts           # Event tracking
+│   │   └── stats/route.ts     # Analytics stats
 │   └── init/route.ts          # Database setup
 
 components/

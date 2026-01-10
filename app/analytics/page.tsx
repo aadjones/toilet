@@ -35,7 +35,7 @@ export default function AdminPage() {
     setLoading(true);
     setError('');
     try {
-      const response = await fetch('/api/admin/stats', {
+      const response = await fetch('/api/analytics/stats', {
         headers: {
           'Authorization': `Bearer ${password}`,
         },
@@ -262,56 +262,54 @@ export default function AdminPage() {
               )}
             </div>
 
-            {/* Wall Rotations Matrix */}
+            {/* Wall Rotations */}
             <div className="bg-gradient-to-br from-[#1a1c1e] to-[#141516] rounded-xl p-6 border border-white/5">
-              <h2 className="text-xl font-bold mb-6">Wall Rotations</h2>
+              <h2 className="text-xl font-bold mb-6">Navigation Patterns</h2>
               {stats.rotations.length > 0 ? (
-                <div>
-                  <div className="grid grid-cols-4 gap-2 mb-4">
-                    <div></div>
-                    <div className="text-center text-xs text-gray-500 uppercase">Front</div>
-                    <div className="text-center text-xs text-gray-500 uppercase">Left</div>
-                    <div className="text-center text-xs text-gray-500 uppercase">Right</div>
-                  </div>
-                  {(['front', 'left', 'right'] as const).map(fromWall => (
-                    <div key={fromWall} className="grid grid-cols-4 gap-2 mb-2">
-                      <div className="text-xs text-gray-500 uppercase flex items-center">{fromWall}</div>
-                      {(['front', 'left', 'right'] as const).map(toWall => {
-                        const rotation = stats.rotations.find(
-                          r => r.from_wall === fromWall && r.to_wall === toWall
-                        );
-                        const count = rotation ? Number(rotation.total) : 0;
-                        const maxCount = Math.max(...stats.rotations.map(r => Number(r.total)));
-                        const intensity = maxCount > 0 ? count / maxCount : 0;
-                        const wallColor = WALL_COLORS[toWall];
+                <div className="space-y-3">
+                  {stats.rotations
+                    .sort((a, b) => Number(b.total) - Number(a.total))
+                    .map((rotation, i) => {
+                      const fromColor = WALL_COLORS[rotation.from_wall as keyof typeof WALL_COLORS];
+                      const toColor = WALL_COLORS[rotation.to_wall as keyof typeof WALL_COLORS];
+                      const maxCount = Math.max(...stats.rotations.map(r => Number(r.total)));
+                      const percentage = maxCount > 0 ? (Number(rotation.total) / maxCount) * 100 : 0;
 
-                        return (
-                          <div
-                            key={toWall}
-                            className="h-16 rounded-lg border border-white/5 flex items-center justify-center font-bold text-lg transition-all hover:scale-105"
-                            style={{
-                              backgroundColor: count > 0 ? `${wallColor}${Math.round(intensity * 255).toString(16).padStart(2, '0')}` : '#0a0a0a',
-                            }}
-                          >
-                            {count > 0 ? count : '−'}
+                      return (
+                        <div key={i} className="flex items-center gap-4">
+                          <div className="flex items-center gap-2 min-w-[180px]">
+                            <div
+                              className="w-3 h-3 rounded-full"
+                              style={{ backgroundColor: fromColor }}
+                            />
+                            <span className="capitalize text-sm">{rotation.from_wall}</span>
+                            <svg className="w-4 h-4 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                            </svg>
+                            <span className="capitalize text-sm">{rotation.to_wall}</span>
+                            <div
+                              className="w-3 h-3 rounded-full"
+                              style={{ backgroundColor: toColor }}
+                            />
                           </div>
-                        );
-                      })}
-                    </div>
-                  ))}
-                  <div className="mt-4 flex items-center gap-4 text-xs text-gray-500">
-                    <span>Intensity:</span>
-                    <div className="flex gap-1">
-                      {[0.2, 0.4, 0.6, 0.8, 1.0].map(opacity => (
-                        <div
-                          key={opacity}
-                          className="w-8 h-4 rounded"
-                          style={{ backgroundColor: `#4a9eff${Math.round(opacity * 255).toString(16).padStart(2, '0')}` }}
-                        />
-                      ))}
-                    </div>
-                    <span>Low → High</span>
-                  </div>
+                          <div className="flex-1 max-w-md">
+                            <div className="h-6 bg-[#0a0a0a] rounded-full overflow-hidden">
+                              <div
+                                className="h-full transition-all duration-500"
+                                style={{
+                                  width: `${percentage}%`,
+                                  backgroundColor: toColor,
+                                  opacity: 0.7,
+                                }}
+                              />
+                            </div>
+                          </div>
+                          <div className="text-2xl font-bold min-w-[60px] text-right">
+                            {rotation.total}
+                          </div>
+                        </div>
+                      );
+                    })}
                 </div>
               ) : (
                 <div className="text-center py-12">
@@ -382,34 +380,6 @@ export default function AdminPage() {
               )}
             </div>
 
-            {/* Activity Timeline */}
-            {stats.timeline && stats.timeline.length > 0 && (
-              <div className="bg-gradient-to-br from-[#1a1c1e] to-[#141516] rounded-xl p-6 border border-white/5">
-                <h2 className="text-xl font-bold mb-6">Activity Timeline (Last 7 Days)</h2>
-                <div className="flex items-end gap-1 h-32">
-                  {stats.timeline.slice().reverse().map((t, i) => {
-                    const maxCount = Math.max(...stats.timeline.map(x => Number(x.count)));
-                    const height = maxCount > 0 ? (Number(t.count) / maxCount) * 100 : 0;
-                    const date = new Date(t.hour);
-                    const label = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-
-                    return (
-                      <div key={i} className="flex-1 flex flex-col items-center gap-2 group">
-                        <div className="w-full bg-[#0a0a0a] rounded-t relative" style={{ height: '100%' }}>
-                          <div
-                            className="absolute bottom-0 w-full bg-[#d94f30] rounded-t transition-all group-hover:bg-[#ff6b4a]"
-                            style={{ height: `${height}%` }}
-                          />
-                        </div>
-                        <div className="text-xs text-gray-600 group-hover:text-gray-400 transition-colors">
-                          {i % Math.ceil(stats.timeline.length / 8) === 0 ? label : ''}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
           </div>
         )}
       </div>
