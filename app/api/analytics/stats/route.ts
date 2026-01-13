@@ -16,7 +16,13 @@ export async function GET(request: NextRequest) {
 
   try {
     const stats = await getAnalyticsStats();
-    return NextResponse.json(stats);
+
+    // Cache analytics for 2 minutes - reduces bandwidth for dashboard refreshes
+    return NextResponse.json(stats, {
+      headers: {
+        'Cache-Control': 'private, s-maxage=120, stale-while-revalidate=240',
+      },
+    });
   } catch (error) {
     console.error('Failed to fetch analytics stats:', error);
     return NextResponse.json(

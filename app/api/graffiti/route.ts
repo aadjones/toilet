@@ -17,7 +17,17 @@ export async function GET(request: NextRequest) {
 
   try {
     const graffiti = await getGraffitiForWall(wall);
-    return NextResponse.json({ graffiti });
+
+    // Cache for 5 minutes - graffiti doesn't change that often
+    // This dramatically reduces bandwidth by allowing browsers and CDN to reuse responses
+    return NextResponse.json(
+      { graffiti },
+      {
+        headers: {
+          'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+        },
+      }
+    );
   } catch (error) {
     console.error('Failed to fetch graffiti:', error);
     return NextResponse.json(
