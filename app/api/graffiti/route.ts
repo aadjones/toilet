@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { revalidateTag } from 'next/cache';
 import { getGraffitiForWall, createGraffiti } from '@/lib/db';
 import { IMPLEMENT_STYLES, type WallType, type ImplementType, type Stroke } from '@/lib/config';
 import { checkRateLimit } from '@/lib/rate-limit';
@@ -146,10 +145,12 @@ export async function POST(request: NextRequest) {
 
     const id = await createGraffiti(wall, implement, strokeData, color);
 
-    // Invalidate cache for this wall so fresh graffiti shows immediately on refresh
-    revalidateTag(`graffiti-${wall}`);
+    // Purge Vercel cache for this wall so fresh graffiti shows immediately on refresh
+    // Using Vercel's Cache-Tag header to purge specific cache tags
+    const response = NextResponse.json({ id, success: true });
+    response.headers.set('x-vercel-purge', `graffiti-${wall}`);
 
-    return NextResponse.json({ id, success: true });
+    return response;
   } catch (error) {
     console.error('Failed to create graffiti:', error);
     return NextResponse.json(
