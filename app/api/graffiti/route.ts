@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidateTag } from 'next/cache';
 import { getGraffitiForWall, createGraffiti } from '@/lib/db';
 import { IMPLEMENT_STYLES, type WallType, type ImplementType, type Stroke } from '@/lib/config';
 import { checkRateLimit } from '@/lib/rate-limit';
@@ -20,7 +21,8 @@ export async function GET(request: NextRequest) {
 
     // Cache at CDN for 30 seconds (matches polling interval)
     // Browser always fetches fresh, but CDN protects DB from repeated requests
-    return NextResponse.json(
+    // Tagged by wall so we can invalidate when new graffiti is posted
+    const response = NextResponse.json(
       { graffiti },
       {
         headers: {
@@ -28,6 +30,11 @@ export async function GET(request: NextRequest) {
         },
       }
     );
+
+    // Tag for cache revalidation
+    response.headers.set('x-vercel-cache-tags', `graffiti-${wall}`);
+
+    return response;
   } catch (error) {
     console.error('Failed to fetch graffiti:', error);
     return NextResponse.json(
@@ -138,6 +145,9 @@ export async function POST(request: NextRequest) {
     const color = IMPLEMENT_STYLES[implement].color;
 
     const id = await createGraffiti(wall, implement, strokeData, color);
+
+    // Invalidate cache for this wall so fresh graffiti shows immediately on refresh
+    revalidateTag(`graffiti-${wall}`);
 
     return NextResponse.json({ id, success: true });
   } catch (error) {
