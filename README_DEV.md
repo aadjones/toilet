@@ -183,16 +183,18 @@ opacity = 1 - (elapsedTime / totalDecayDuration)
 
 **Location:** [lib/utils.ts](lib/utils.ts) - `calculateOpacity()`
 
-### Polling Interval
-- New graffiti fetched every 30 seconds (configurable via `POLL_INTERVAL_MS`)
-- Keeps all users' views in sync
-- Shows fading graffiti from other users
+### Real-Time Updates
+- Graffiti updates instantly via Ably WebSockets (no polling)
+- All connected users receive new graffiti within ~100ms
+- WebSocket connection maintained for the duration of the session
+- Automatic reconnection on network interruptions
 
 ## API Endpoints
 
 ### Public Endpoints
 - `GET /api/graffiti?wall={wall}` - Fetch graffiti for a wall
-- `POST /api/graffiti` - Submit new graffiti
+- `POST /api/graffiti` - Submit new graffiti (also broadcasts via Ably)
+- `GET /api/ably/token` - Get token for Ably WebSocket auth
 - `POST /api/analytics` - Track analytics event
 - `GET /api/init` - Initialize database tables
 
@@ -204,7 +206,10 @@ opacity = 1 - (elapsedTime / totalDecayDuration)
 
 ```bash
 # Database (required)
-POSTGRES_URL="your-vercel-postgres-url"
+DATABASE_URL="postgresql://user:password@host/dbname?sslmode=require"
+
+# Real-time messaging (required)
+ABLY_API_KEY="your-ably-api-key"
 
 # Admin Access (recommended to change)
 ADMIN_PASSWORD="admin123"
@@ -217,7 +222,6 @@ WHITEOUT_DURATION_MS=7200000
 
 # Other Config (optional)
 SESSION_TIMEOUT_MS=120000    # 2 minutes
-POLL_INTERVAL_MS=30000       # 30 seconds
 ```
 
 ## Development Workflow
@@ -257,6 +261,21 @@ DELETE FROM analytics_events;
 
 ## Architecture Notes
 
+### Why Ably instead of WebSockets directly?
+- Handles complex edge cases (reconnection, mobile network switching, battery optimization)
+- Scales automatically with user count
+- Free tier covers our needs (6M messages/month)
+- Reliable message delivery guarantees
+- Simpler than running our own WebSocket server
+
+### How real-time updates work
+1. Client opens WebSocket to Ably on page load (`authUrl: '/api/ably/token'`)
+2. Client subscribes to "graffiti-wall" channel (read-only)
+3. When user draws, client sends POST to `/api/graffiti`
+4. Server saves to Postgres, then broadcasts message to Ably channel
+5. Ably pushes message to all connected clients (~100ms latency)
+6. Clients render graffiti instantly without refreshing
+
 ### Why client-side session IDs?
 - No user authentication required
 - Privacy-focused (no personal data)
@@ -292,22 +311,25 @@ DELETE FROM analytics_events;
 app/
 ├── analytics/page.tsx          # Analytics dashboard
 ├── api/
-│   ├── graffiti/route.ts      # Graffiti CRUD
+│   ├── graffiti/route.ts      # Graffiti CRUD + Ably broadcast
+│   ├── ably/token/route.ts    # Ably auth token endpoint
 │   ├── analytics/
 │   │   ├── route.ts           # Event tracking
 │   │   └── stats/route.ts     # Analytics stats
 │   └── init/route.ts          # Database setup
 
 components/
-├── StallView3D.tsx            # Main bathroom scene
+├── StallView3D.tsx            # Main bathroom scene + Ably subscription
 ├── DebugPanel.tsx             # Debug overlay (` key)
 ├── ImplementPicker.tsx        # Tool selector
 └── icons/ImplementIcons.tsx   # Tool icons
 
 lib/
-├── db.ts                      # Database functions
+├── db.ts                      # Database functions (Neon Postgres)
 ├── config.ts                  # Implement & decay config
 ├── analytics.ts               # Client analytics helper
 ├── session.ts                 # Session ID management
+├── feature-flags.ts           # Runtime feature toggles
+├── rate-limit.ts              # IP-based rate limiting
 └── utils.ts                   # Opacity calculation
 ```

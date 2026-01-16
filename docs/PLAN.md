@@ -6,18 +6,62 @@ A minimal PWA simulating a public bathroom stall wall with ephemeral, anonymous 
 
 ## Tech Stack
 
-- **Framework**: Next.js 14 (App Router)
-- **Database**: Vercel Postgres (managed, serverless-friendly)
+- **Framework**: Next.js 16 (App Router)
+- **Database**: Neon Postgres (managed, serverless-friendly)
 - **3D Layout**: CSS 3D transforms (perspective, preserve-3d)
 - **Canvas**: HTML Canvas API for drawing and rendering graffiti
 - **Styling**: Tailwind CSS
-- **State**: React state + polling (no WebSockets)
+- **Real-time Updates**: Ably WebSockets (pub/sub messaging)
 
 ### Why This Stack?
 
-- **Vercel Postgres**: Zero-config with Vercel hosting, scales automatically, familiar SQL.
+- **Neon Postgres**: Serverless Postgres with generous free tier, automatic scaling, fast connection pooling.
 - **CSS 3D transforms**: Lightweight 3D for positioning flat wall surfaces in perspective. No WebGL overhead.
 - **Next.js App Router**: API routes alongside frontend, easy PWA setup.
+- **Ably**: Real-time pub/sub messaging (6M messages/month free tier). Instant graffiti updates across all connected users without polling or CDN cache delays.
+
+---
+
+## Real-Time Architecture (How Graffiti Updates Work)
+
+**The Problem We Solved:**
+Originally, the app used HTTP polling (checking every 30 seconds for new graffiti) and CDN caching (storing responses for 5 minutes). This meant:
+- When you drew graffiti, it appeared for you instantly
+- But other users wouldn't see it for 30-60 seconds
+- On page refresh, even you wouldn't see your graffiti for 30 seconds
+- It felt slow and broken
+
+**The Solution: WebSockets + Pub/Sub**
+
+Think of it like a group chat, but for graffiti updates:
+
+1. **When you load the app:**
+   - Your browser opens a permanent connection to Ably (a real-time messaging service)
+   - This is like joining a chat room called "graffiti-wall"
+   - The connection stays open as long as you're on the page
+
+2. **When you draw something:**
+   - Your browser sends the graffiti to our server (POST /api/graffiti)
+   - The server saves it to the database
+   - The server immediately broadcasts a message to Ably: "Hey, new graffiti just appeared!"
+   - Ably instantly pushes this message to ALL browsers that are connected (including yours)
+   - Everyone's wall updates in real-time (usually under 100ms)
+
+3. **What is Ably?**
+   - It's a third-party service that handles WebSocket connections for us
+   - WebSocket = a two-way connection between browser and server (not one-way like normal HTTP)
+   - We use Ably instead of running our own WebSocket server because:
+     - They handle the hard parts (reconnection, scaling, mobile battery optimization)
+     - It's free for our usage level (6M messages/month)
+     - It works reliably on mobile networks when connections drop
+
+4. **Security:**
+   - Clients can only SUBSCRIBE (read messages), not publish
+   - Only our server can broadcast new graffiti
+   - Clients get a temporary auth token from `/api/ably/token` that expires after 1 hour
+   - The main API key never leaves our server
+
+**In Short:** Instead of asking "hey, is there new graffiti?" every 30 seconds, your browser keeps an open connection and gets pushed updates the instant they happen. It's the difference between refreshing your email manually vs getting push notifications.
 
 ---
 
@@ -147,7 +191,7 @@ For v1: Only horizontal rotation (Y-axis). Vertical tilt deferred.
 - User faces front wall
 - Left and right walls visible at perspective angles
 - All three walls show their graffiti rendered on canvas
-- Poll server every 30s for updates
+- WebSocket connection to Ably receives instant updates when anyone draws
 
 ### Graffiti Rendering
 
@@ -202,7 +246,7 @@ This naturally creates the "you have to work for it" friction without error mess
 
 ### `GET /api/graffiti?wall=front`
 
-Returns all non-expired graffiti for specified wall.
+Returns all non-expired graffiti for specified wall. No caching - users need fresh data on page load.
 
 ```json
 {
@@ -234,6 +278,17 @@ Coordinates stored as 0-1 ratios (percent of wall), rendered to actual pixels cl
 
 Returns: `{ "id": "uuid", "success": true }`
 
+After saving to database, broadcasts the new graffiti to all connected clients via Ably:
+```javascript
+const ably = new Ably.Rest(process.env.ABLY_API_KEY);
+const channel = ably.channels.get('graffiti-wall');
+await channel.publish('new-graffiti', graffitiData);
+```
+
+### `GET /api/ably/token`
+
+Returns a token request for client-side Ably authentication. Clients use this to establish a secure WebSocket connection with read-only permissions.
+
 ### Cleanup (Vercel Cron)
 
 Vercel cron job runs hourly to delete expired graffiti:
@@ -253,28 +308,29 @@ toilet/
 │   ├── globals.css             # Tailwind + 3D styles + textures
 │   └── api/
 │       ├── graffiti/
-│       │   └── route.ts        # GET and POST handlers
+│       │   └── route.ts        # GET and POST handlers + Ably broadcast
+│       ├── ably/
+│       │   └── token/
+│       │       └── route.ts    # Token auth for Ably client connections
 │       └── cron/
 │           └── cleanup/
 │               └── route.ts    # Vercel cron cleanup endpoint
 ├── components/
-│   ├── StallView.tsx           # 3D room container with rotation
+│   ├── StallView3D.tsx         # 3D room with rotation + Ably subscription
 │   ├── Wall.tsx                # Single wall with canvas
 │   ├── DrawingMode.tsx         # Full-screen drawing overlay
-│   └── ImplementPicker.tsx     # Scribble/Marker/Carved toolbar
+│   └── ImplementPicker.tsx     # Scribble/Marker/Carved/Whiteout toolbar
 ├── lib/
-│   ├── db.ts                   # Vercel Postgres queries
+│   ├── db.ts                   # Neon Postgres queries
 │   ├── session.ts              # Session ID + activity tracking
-│   ├── config.ts               # Decay durations from env
-│   └── drawing.ts              # Stroke processing, velocity calc
+│   ├── config.ts               # Decay durations, implement styles
+│   ├── feature-flags.ts        # Runtime feature toggles
+│   └── rate-limit.ts           # IP-based rate limiting
 ├── public/
 │   ├── manifest.json           # PWA manifest
-│   ├── icon-192.png
-│   ├── icon-512.png
-│   └── textures/
-│       └── wall-texture.png    # Subtle wall texture
+│   └── icons/                  # App icons
 ├── vercel.json                 # Cron job config
-└── package.json
+└── package.json                # Includes ably, uuid, pg dependencies
 ```
 
 ---
@@ -336,12 +392,22 @@ toilet/
 
 ---
 
-## Hosting
+## Hosting & Services
 
-**Vercel** with:
-- Vercel Postgres for database
-- Vercel Cron for cleanup job
+**Vercel** (hosting):
 - Edge functions for API routes
+- Vercel Cron for cleanup job
+- Environment variables for API keys
+
+**Neon** (database):
+- Serverless Postgres with connection pooling
+- Automatic scaling
+- Free tier: 512 MB storage, 0.5 GB data transfer
+
+**Ably** (real-time messaging):
+- WebSocket pub/sub for instant graffiti updates
+- Free tier: 6M messages/month, 200 concurrent connections
+- Token-based auth (API key never exposed to clients)
 
 ---
 
