@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import Ably from 'ably';
 import { getGraffitiForWall, createGraffiti } from '@/lib/db';
-import { IMPLEMENT_STYLES, type WallType, type ImplementType, type Stroke } from '@/lib/config';
+import { IMPLEMENT_STYLES, type WallType, type ImplementType, type Stroke, DECAY_DURATIONS } from '@/lib/config';
 import { checkRateLimit } from '@/lib/rate-limit';
 import { FEATURE_FLAGS } from '@/lib/feature-flags';
 
@@ -18,22 +19,16 @@ export async function GET(request: NextRequest) {
   try {
     const graffiti = await getGraffitiForWall(wall);
 
-    // Cache at CDN for 30 seconds (matches polling interval)
-    // Browser always fetches fresh, but CDN protects DB from repeated requests
-    // Tagged by wall so we can invalidate when new graffiti is posted
-    const response = NextResponse.json(
+    // No CDN caching - users need to see graffiti updates immediately
+    // The database can handle the load with proper indexing on (wall, expires_at)
+    return NextResponse.json(
       { graffiti },
       {
         headers: {
-          'Cache-Control': 'public, max-age=0, s-maxage=30, must-revalidate',
+          'Cache-Control': 'no-store, must-revalidate',
         },
       }
     );
-
-    // Tag for cache revalidation
-    response.headers.set('x-vercel-cache-tags', `graffiti-${wall}`);
-
-    return response;
   } catch (error) {
     console.error('Failed to fetch graffiti:', error);
     return NextResponse.json(
@@ -145,12 +140,30 @@ export async function POST(request: NextRequest) {
 
     const id = await createGraffiti(wall, implement, strokeData, color);
 
-    // Purge Vercel cache for this wall so fresh graffiti shows immediately on refresh
-    // Using Vercel's Cache-Tag header to purge specific cache tags
-    const response = NextResponse.json({ id, success: true });
-    response.headers.set('x-vercel-purge', `graffiti-${wall}`);
+    // Broadcast new graffiti to all connected clients via Ably
+    try {
+      const ably = new Ably.Rest(process.env.ABLY_API_KEY!);
+      const channel = ably.channels.get('graffiti-wall');
 
-    return response;
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + DECAY_DURATIONS[implement]);
+
+      await channel.publish('new-graffiti', {
+        id,
+        wall,
+        implement,
+        strokeData,
+        color,
+        createdAt: now.toISOString(),
+        expiresAt: expiresAt.toISOString(),
+        opacity: 1,
+      });
+    } catch (error) {
+      console.error('Failed to broadcast via Ably:', error);
+      // Don't fail the request if Ably fails - graffiti is still saved to DB
+    }
+
+    return NextResponse.json({ id, success: true });
   } catch (error) {
     console.error('Failed to create graffiti:', error);
     return NextResponse.json(

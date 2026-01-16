@@ -9,7 +9,6 @@ import {
   type Stroke,
   type StrokePoint,
   type ImplementType,
-  POLL_INTERVAL_MS,
   IMPLEMENT_STYLES,
 } from "@/lib/config";
 import { renderGraffitiStrokes } from "@/lib/wall-rendering";
@@ -563,12 +562,43 @@ export function StallView3D({
     }
   }, [addLocalGraffiti, getWallGraffiti, stallRef]);
 
-  // Initial fetch and polling
+  // Initial fetch only (no more polling - using Ably real-time instead)
   useEffect(() => {
     fetchGraffiti();
-    const interval = setInterval(fetchGraffiti, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
   }, [fetchGraffiti]);
+
+  // Real-time subscription to graffiti updates via Ably
+  useEffect(() => {
+    const initAbly = async () => {
+      try {
+        const Ably = (await import('ably')).default;
+        const ably = new Ably.Realtime({ authUrl: '/api/ably/token' });
+
+        const channel = ably.channels.get('graffiti-wall');
+
+        channel.subscribe('new-graffiti', (message) => {
+          const newGraffiti = message.data as Graffiti;
+          // Add the new graffiti to the appropriate wall
+          setGraffiti((prev) => ({
+            ...prev,
+            [newGraffiti.wall]: [...prev[newGraffiti.wall], newGraffiti],
+          }));
+        });
+
+        return () => {
+          channel.unsubscribe();
+          ably.close();
+        };
+      } catch (error) {
+        console.error('Failed to initialize Ably:', error);
+      }
+    };
+
+    const cleanup = initAbly();
+    return () => {
+      cleanup.then((fn) => fn?.());
+    };
+  }, []);
 
   // Rotation logic
   const rotate = useCallback(
