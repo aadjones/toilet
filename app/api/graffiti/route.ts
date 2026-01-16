@@ -18,13 +18,13 @@ export async function GET(request: NextRequest) {
   try {
     const graffiti = await getGraffitiForWall(wall);
 
-    // Cache for 5 minutes - graffiti doesn't change that often
-    // This dramatically reduces bandwidth by allowing browsers and CDN to reuse responses
+    // Cache at CDN for 30 seconds (matches polling interval)
+    // Browser always fetches fresh, but CDN protects DB from repeated requests
     return NextResponse.json(
       { graffiti },
       {
         headers: {
-          'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+          'Cache-Control': 'public, max-age=0, s-maxage=30, must-revalidate',
         },
       }
     );
