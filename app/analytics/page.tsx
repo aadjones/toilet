@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { IMPLEMENT_STYLES, DECAY_DURATIONS, type ImplementType } from '@/lib/config';
+import { DECAY_DURATIONS, type ImplementType } from '@/lib/config';
 
 interface AnalyticsStats {
   totalSessions: number;
@@ -11,11 +11,16 @@ interface AnalyticsStats {
   timeline: Array<{ hour: string; count: number }>;
 }
 
-// Wall colors for visualization
-const WALL_COLORS = {
-  front: '#4a9eff',
-  left: '#ff6b9d',
-  right: '#ffc107',
+// Removed arbitrary wall colors - using monochrome design per design review
+// Wall directions don't need color coding; typography conveys the information
+
+// Implement colors for visualization (high contrast for dark backgrounds)
+// These override IMPLEMENT_STYLES colors which are optimized for light bathroom walls
+const IMPLEMENT_VIZ_COLORS = {
+  whiteout: '#ffffff',
+  carved: '#d4a574', // Changed to more saturated tan/orange for better distinction from gray
+  marker: '#1a8fff',
+  scribble: '#6b7280', // Darker gray for better contrast with carved
 } as const;
 
 export default function AdminPage() {
@@ -24,6 +29,18 @@ export default function AdminPage() {
   const [stats, setStats] = useState<AnalyticsStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    // Allow page scrolling on analytics page (override global overflow:hidden)
+    document.documentElement.style.overflow = 'auto';
+    document.body.style.overflow = 'auto';
+
+    return () => {
+      // Restore global overflow settings when leaving page
+      document.documentElement.style.overflow = 'hidden';
+      document.body.style.overflow = 'hidden';
+    };
+  }, []);
 
   useEffect(() => {
     if (authenticated) {
@@ -130,7 +147,6 @@ export default function AdminPage() {
   }
 
   const totalDrawings = stats?.drawings.reduce((sum, d) => sum + Number(d.count), 0) || 0;
-  const totalRotations = stats?.rotations.reduce((sum, r) => sum + Number(r.total), 0) || 0;
   const drawingsPerSession = stats && stats.totalSessions > 0
     ? (totalDrawings / Number(stats.totalSessions)).toFixed(1)
     : '0.0';
@@ -215,7 +231,7 @@ export default function AdminPage() {
                 <div className="space-y-4">
                   {stats.implements.map((impl, i) => {
                     const implementKey = impl.implement as ImplementType;
-                    const color = IMPLEMENT_STYLES[implementKey]?.color || '#888888';
+                    const color = IMPLEMENT_VIZ_COLORS[implementKey] || '#888888';
                     const decayMs = DECAY_DURATIONS[implementKey] || 0;
                     const decayHours = Math.round(decayMs / (1000 * 60 * 60));
                     const percentage = (Number(impl.count) / Number(stats.implements[0].count)) * 100;
@@ -270,36 +286,22 @@ export default function AdminPage() {
                   {stats.rotations
                     .sort((a, b) => Number(b.total) - Number(a.total))
                     .map((rotation, i) => {
-                      const fromColor = WALL_COLORS[rotation.from_wall as keyof typeof WALL_COLORS];
-                      const toColor = WALL_COLORS[rotation.to_wall as keyof typeof WALL_COLORS];
                       const maxCount = Math.max(...stats.rotations.map(r => Number(r.total)));
                       const percentage = maxCount > 0 ? (Number(rotation.total) / maxCount) * 100 : 0;
 
                       return (
                         <div key={i} className="flex items-center gap-4">
-                          <div className="flex items-center gap-2 min-w-[180px]">
-                            <div
-                              className="w-3 h-3 rounded-full"
-                              style={{ backgroundColor: fromColor }}
-                            />
-                            <span className="capitalize text-sm">{rotation.from_wall}</span>
-                            <svg className="w-4 h-4 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                            </svg>
-                            <span className="capitalize text-sm">{rotation.to_wall}</span>
-                            <div
-                              className="w-3 h-3 rounded-full"
-                              style={{ backgroundColor: toColor }}
-                            />
+                          <div className="font-mono text-sm text-gray-300 min-w-[140px]">
+                            <span className="capitalize">{rotation.from_wall}</span>
+                            <span className="text-gray-600 mx-1">→</span>
+                            <span className="capitalize">{rotation.to_wall}</span>
                           </div>
                           <div className="flex-1 max-w-md">
                             <div className="h-6 bg-[#0a0a0a] rounded-full overflow-hidden">
                               <div
-                                className="h-full transition-all duration-500"
+                                className="h-full transition-all duration-500 bg-white/20"
                                 style={{
                                   width: `${percentage}%`,
-                                  backgroundColor: toColor,
-                                  opacity: 0.7,
                                 }}
                               />
                             </div>
@@ -322,36 +324,32 @@ export default function AdminPage() {
             </div>
 
             {/* Graffiti Distribution Grid */}
-            <div className="bg-gradient-to-br from-[#1a1c1e] to-[#141516] rounded-xl p-6 border border-white/5">
-              <h2 className="text-xl font-bold mb-6">Graffiti by Wall & Implement</h2>
+            <div className="bg-gradient-to-br from-[#1a1c1e] to-[#141516] rounded-xl border border-white/5 overflow-hidden">
+              <div className="p-6 pb-0">
+                <h2 className="text-xl font-bold mb-6">Graffiti by Wall & Implement</h2>
+              </div>
               {stats.drawings.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-white/5">
-                        <th className="text-left text-xs text-gray-500 uppercase tracking-wider pb-3">Wall</th>
-                        <th className="text-left text-xs text-gray-500 uppercase tracking-wider pb-3">Implement</th>
-                        <th className="text-right text-xs text-gray-500 uppercase tracking-wider pb-3">Count</th>
-                        <th className="text-right text-xs text-gray-500 uppercase tracking-wider pb-3">%</th>
-                      </tr>
-                    </thead>
+                <div className="px-6 pb-6">
+                  <div>
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-white/5">
+                          <th className="text-left text-xs text-gray-400 uppercase tracking-wider pb-3 pt-1">Wall</th>
+                          <th className="text-left text-xs text-gray-400 uppercase tracking-wider pb-3 pt-1">Implement</th>
+                          <th className="text-right text-xs text-gray-400 uppercase tracking-wider pb-3 pt-1">Count</th>
+                          <th className="text-right text-xs text-gray-400 uppercase tracking-wider pb-3 pt-1">%</th>
+                        </tr>
+                      </thead>
                     <tbody>
                       {stats.drawings.map((d, i) => {
-                        const wallColor = WALL_COLORS[d.wall as keyof typeof WALL_COLORS] || '#888888';
-                        const implementColor = IMPLEMENT_STYLES[d.implement as ImplementType]?.color || '#888888';
+                        const implementColor = IMPLEMENT_VIZ_COLORS[d.implement as ImplementType] || '#888888';
                         const percentage = totalDrawings > 0 ? ((Number(d.count) / totalDrawings) * 100).toFixed(1) : '0';
                         const displayName = d.implement === 'scribble' ? 'Pencil' : d.implement;
 
                         return (
                           <tr key={i} className="border-b border-white/5 hover:bg-white/5 transition-colors">
                             <td className="py-3">
-                              <div className="flex items-center gap-2">
-                                <div
-                                  className="w-3 h-3 rounded-full"
-                                  style={{ backgroundColor: wallColor }}
-                                />
-                                <span className="capitalize">{d.wall}</span>
-                              </div>
+                              <span className="capitalize text-gray-300">{d.wall}</span>
                             </td>
                             <td className="py-3">
                               <div className="flex items-center gap-2">
@@ -368,10 +366,11 @@ export default function AdminPage() {
                         );
                       })}
                     </tbody>
-                  </table>
+                    </table>
+                  </div>
                 </div>
               ) : (
-                <div className="text-center py-12">
+                <div className="text-center py-12 px-6">
                   <svg className="w-16 h-16 text-gray-700 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                   </svg>

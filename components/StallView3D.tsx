@@ -443,6 +443,9 @@ export function StallView3D({
     height: 736,
   });
 
+  // Desktop detection for custom cursors
+  const [isDesktop, setIsDesktop] = useState(false);
+
   // Debug controls
   const [showDebug, setShowDebug] = useState(false);
   const [fov, setFov] = useState(72); // Field of view from user's preferred settings
@@ -544,7 +547,7 @@ export function StallView3D({
     }
   }, []);
 
-  // Add graffiti instantly (called from DrawingMode)
+  // Add graffiti instantly to local state (optimistic update)
   const addLocalGraffiti = useCallback(
     (wall: WallType, newGraffiti: Graffiti) => {
       setGraffiti((prev) => ({
@@ -561,6 +564,17 @@ export function StallView3D({
       stallRef.current = { addLocalGraffiti, getWallGraffiti };
     }
   }, [addLocalGraffiti, getWallGraffiti, stallRef]);
+
+  // Detect if we're on a desktop (non-touch) device for custom cursors
+  useEffect(() => {
+    const checkDesktop = () => {
+      const hasFineMouse = window.matchMedia('(pointer: fine)').matches;
+      setIsDesktop(hasFineMouse);
+    };
+    checkDesktop();
+    window.addEventListener('resize', checkDesktop);
+    return () => window.removeEventListener('resize', checkDesktop);
+  }, []);
 
   // Initial fetch only (no more polling - using Ably real-time instead)
   useEffect(() => {
@@ -1044,7 +1058,9 @@ export function StallView3D({
         {/* Drawing canvas overlay - positioned above 3D canvas */}
         <canvas
           ref={canvasRef}
-          className="absolute inset-0 w-full h-full pointer-events-auto touch-none"
+          className={`absolute inset-0 w-full h-full pointer-events-auto touch-none ${
+            isDesktop ? `cursor-${implement}` : ''
+          }`}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}

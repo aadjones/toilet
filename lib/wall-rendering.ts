@@ -9,34 +9,45 @@ function seededRandom(seed: number): number {
   return x - Math.floor(x);
 }
 
+// Reference width for line width calibration
+// Line widths in IMPLEMENT_STYLES are calibrated for this canvas width
+export const LINE_WIDTH_REFERENCE = 480;
+
 /**
  * Renders graffiti strokes onto a canvas context.
  * This is the single source of truth for how graffiti appears visually.
- * Used by both StallView3D (texture generation) and DrawingMode (live preview).
+ * Used by StallView3D for both texture generation and live preview.
+ *
+ * @param lineWidthScale - Optional scale factor for line widths. If not provided,
+ *                         line widths are scaled proportionally to canvas width
+ *                         relative to LINE_WIDTH_REFERENCE (480px).
  */
 export function renderGraffitiStrokes(
   ctx: CanvasRenderingContext2D,
   graffiti: Graffiti[],
   width: number,
-  height: number
+  height: number,
+  lineWidthScale?: number
 ): void {
-  graffiti.forEach((g, graffitiIndex) => {
+  // Scale line widths proportionally to canvas size if no explicit scale provided
+  const scale = lineWidthScale ?? (width / LINE_WIDTH_REFERENCE);
+  graffiti.forEach((g) => {
     const style = IMPLEMENT_STYLES[g.implement as ImplementType];
 
     ctx.strokeStyle = g.color;
-    ctx.lineWidth = style.lineWidth;
+    ctx.lineWidth = style.lineWidth * scale;
     ctx.lineCap = style.lineCap;
     ctx.lineJoin = style.lineJoin;
     ctx.globalAlpha = g.opacity;
 
-    // Apply shadow for depth (marker and carved)
-    ctx.shadowBlur = style.shadowBlur;
+    // Apply shadow for depth (marker and carved) - scale with line width
+    ctx.shadowBlur = style.shadowBlur * scale;
     ctx.shadowColor = style.shadowColor;
     ctx.shadowOffsetX = 0;
     ctx.shadowOffsetY = 0;
 
     if (g.implement === 'carved') {
-      ctx.setLineDash([2, 1]);
+      ctx.setLineDash([2 * scale, 1 * scale]);
     } else {
       ctx.setLineDash([]);
     }
@@ -53,21 +64,13 @@ export function renderGraffitiStrokes(
 
         const x = stroke[0].x * width;
         const y = stroke[0].y * height;
-        const radius = style.lineWidth / 2;
+        const radius = (style.lineWidth * scale) / 2;
 
         ctx.beginPath();
         ctx.arc(x, y, radius, 0, Math.PI * 2);
         ctx.fillStyle = g.color;
         ctx.fill();
         return;
-      }
-
-      // DEBUG: Only log for texture canvas, not preview
-      if (graffitiIndex === graffiti.length - 1 && strokeIndex === 0 && width !== 480) {
-        console.log('=== TEXTURE RENDERING ===');
-        console.log('Texture dimensions:', width, 'x', height);
-        console.log('First point (pixels):', { x: stroke[0].x * width, y: stroke[0].y * height });
-        console.log('Last point (pixels):', { x: stroke[stroke.length - 1].x * width, y: stroke[stroke.length - 1].y * height });
       }
 
       ctx.beginPath();
@@ -80,7 +83,7 @@ export function renderGraffitiStrokes(
         if (g.implement === 'scribble') {
           // Use seeded random based on graffiti ID and point index for consistency
           const seed = (g.id.charCodeAt(0) || 0) * 1000 + strokeIndex * 100 + i;
-          const wobble = (seededRandom(seed) - 0.5) * 1;
+          const wobble = (seededRandom(seed) - 0.5) * scale;
           ctx.lineTo(x + wobble, y + wobble);
         } else {
           ctx.lineTo(x, y);
